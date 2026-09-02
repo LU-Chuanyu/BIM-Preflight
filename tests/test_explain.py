@@ -2,7 +2,9 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 from dataclasses import FrozenInstanceError, fields
+from importlib import resources
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -39,12 +41,41 @@ def make_fail_result(*, element_name: str = "Door 1") -> RuleResult:
     )
 
 
+def make_result(
+    *,
+    rule_id: str,
+    status: EngineStatus,
+    finding_code: str,
+    inputs_used: tuple[tuple[str, object], ...] = (),
+) -> RuleResult:
+    return RuleResult(
+        rule_id=rule_id,
+        rule_version="1.0.0",
+        element_global_id="d1",
+        element_name="Door 1",
+        status=status,
+        finding_code=finding_code,
+        message="Engine-owned message.",
+        evidence_refs=("door.d1.width", "rule.threshold"),
+        inputs_used=inputs_used,
+    )
+
+
 def valid_explanation(*, evidence_refs: list[str] | None = None) -> dict[str, object]:
     return {
-        "summary": "The supplied result is below the configured screening threshold.",
+        "summary": "The finding concerns the model-declared door-opening width proxy.",
         "evidence_refs": ["door.d1.width"] if evidence_refs is None else evidence_refs,
         "missing_information": [],
-        "next_action": "Review the authoring model and verify the source data.",
+        "next_action": "Review the model-declared opening-width source in the authoring model.",
+    }
+
+
+def metadata_missing_explanation() -> dict[str, object]:
+    return {
+        "summary": "The finding concerns FireRating and SelfClosing metadata.",
+        "evidence_refs": [],
+        "missing_information": ["FireRating metadata is missing."],
+        "next_action": "Verify the FireRating property and source in the authoring model.",
     }
 
 
@@ -107,6 +138,40 @@ def test_output_schema_is_strict_draft_2020_12_with_exact_fields_and_bounds() ->
     assert schema["properties"]["evidence_refs"]["maxItems"] <= 50
     assert schema["properties"]["missing_information"]["maxItems"] <= 20
     assert schema["properties"]["next_action"]["maxLength"] <= 1000
+    for property_name in ("summary", "next_action"):
+        assert schema["properties"][property_name]["enum"]
+        assert all(value.isascii() for value in schema["properties"][property_name]["enum"])
+    assert schema["properties"]["missing_information"]["items"]["enum"]
+
+
+@pytest.mark.parametrize(
+    ("top_level_name", "packaged_name"),
+    [
+        ("system.md", "system.md"),
+        ("explain_finding.user.md", "explain_finding.user.md"),
+        ("output.schema.json", "output.schema.json"),
+    ],
+)
+def test_submission_and_packaged_runtime_resources_are_identical(
+    top_level_name: str,
+    packaged_name: str,
+) -> None:
+    top_level = Path(__file__).parents[1] / "prompts" / "runtime" / top_level_name
+    packaged = resources.files("bim_preflight.prompt_assets").joinpath(packaged_name)
+
+    assert packaged.read_bytes() == top_level.read_bytes()
+
+
+def test_setuptools_restricts_discovery_and_packages_prompt_assets() -> None:
+    configuration = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
+
+    assert configuration["tool"]["setuptools"]["packages"]["find"]["include"] == [
+        "bim_preflight*"
+    ]
+    assert configuration["tool"]["setuptools"]["package-data"]["bim_preflight.prompt_assets"] == [
+        "*.md",
+        "*.json",
+    ]
 
 
 @pytest.mark.parametrize("mode", VALID_MODES)
@@ -201,7 +266,7 @@ def test_rejects_engine_verdict_status_or_adequacy_claims(text: str) -> None:
     payload = valid_explanation()
     payload["summary"] = text
 
-    with pytest.raises(ExplanationUnavailable, match="semantic"):
+    with pytest.raises(ExplanationUnavailable, match="controlled"):
         validate_explanation(payload, make_fail_result())
 
 
@@ -223,7 +288,7 @@ def test_rejects_llm_authored_quantity_statements(text: str) -> None:
     payload = valid_explanation()
     payload["next_action"] = text
 
-    with pytest.raises(ExplanationUnavailable, match="quantity"):
+    with pytest.raises(ExplanationUnavailable, match="controlled"):
         validate_explanation(payload, make_fail_result())
 
 
@@ -251,19 +316,143 @@ def test_rejects_broad_compliance_approval_certification_or_safety_claims(text: 
     payload = valid_explanation()
     payload["missing_information"] = [text]
 
-    with pytest.raises(ExplanationUnavailable, match="semantic"):
+    with pytest.raises(ExplanationUnavailable, match="controlled"):
         validate_explanation(payload, make_fail_result())
 
 
-def test_normal_review_verify_and_update_wording_is_accepted() -> None:
+def test_accepts_useful_r1_controlled_output() -> None:
     payload = valid_explanation()
-    payload["missing_information"] = ["The source property has not been independently verified."]
-    payload["next_action"] = "Review the authoring model, verify the property, and update the model."
 
     draft = validate_explanation(payload, make_fail_result())
 
     assert isinstance(draft, ExplanationDraft)
     assert draft.next_action == payload["next_action"]
+
+
+def test_accepts_useful_r2_missing_evidence_output() -> None:
+    result = make_result(
+        rule_id="R2_EGRESS_DOOR_METADATA_COMPLETENESS",
+        status=EngineStatus.FAIL,
+        finding_code="FIRE_RATING_MISSING",
+    )
+
+    draft = validate_explanation(metadata_missing_explanation(), result)
+
+    assert draft.missing_information == ("FireRating metadata is missing.",)
+
+
+def test_accepts_matching_unresolved_fire_exit_information() -> None:
+    result = make_result(
+        rule_id="R1_EGRESS_DOOR_OPENING_WIDTH",
+        status=EngineStatus.NOT_EVALUABLE,
+        finding_code="FIRE_EXIT_UNRESOLVED",
+        inputs_used=(("fire_exit_state", "MISSING"),),
+    )
+    payload = {
+        "summary": "The finding concerns the door's FireExit classification.",
+        "evidence_refs": [],
+        "missing_information": ["FireExit classification is missing."],
+        "next_action": "Verify the FireExit property and source in the authoring model.",
+    }
+
+    draft = validate_explanation(payload, result)
+
+    assert draft.missing_information == ("FireExit classification is missing.",)
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        make_result(
+            rule_id="R1_EGRESS_DOOR_OPENING_WIDTH",
+            status=EngineStatus.PASS,
+            finding_code="WIDTH_MEETS_THRESHOLD",
+        ),
+        make_fail_result(),
+        make_result(
+            rule_id="R1_EGRESS_DOOR_OPENING_WIDTH",
+            status=EngineStatus.NOT_APPLICABLE,
+            finding_code="FIRE_EXIT_FALSE",
+        ),
+        make_result(
+            rule_id="R2_EGRESS_DOOR_METADATA_COMPLETENESS",
+            status=EngineStatus.PASS,
+            finding_code="METADATA_COMPLETE",
+        ),
+    ],
+)
+def test_results_without_deficiencies_reject_invented_missing_information(
+    result: RuleResult,
+) -> None:
+    payload = valid_explanation()
+    payload["missing_information"] = ["OverallWidth is missing."]
+
+    with pytest.raises(ExplanationUnavailable, match="controlled"):
+        validate_explanation(payload, result)
+
+
+def test_rejects_missing_information_that_does_not_match_finding_code() -> None:
+    result = make_result(
+        rule_id="R2_EGRESS_DOOR_METADATA_COMPLETENESS",
+        status=EngineStatus.FAIL,
+        finding_code="SELF_CLOSING_INVALID",
+    )
+    payload = {
+        "summary": "The finding concerns FireRating and SelfClosing metadata.",
+        "evidence_refs": [],
+        "missing_information": ["FireRating metadata is missing."],
+        "next_action": "Verify the SelfClosing property and source in the authoring model.",
+    }
+
+    with pytest.raises(ExplanationUnavailable, match="controlled"):
+        validate_explanation(payload, result)
+
+
+def test_rejects_rule_inappropriate_canonical_summary_and_action() -> None:
+    payload = {
+        "summary": "The finding concerns FireRating and SelfClosing metadata.",
+        "evidence_refs": [],
+        "missing_information": [],
+        "next_action": "Review the FireRating and SelfClosing sources in the authoring model.",
+    }
+
+    with pytest.raises(ExplanationUnavailable, match="controlled"):
+        validate_explanation(payload, make_fail_result())
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "门符合规范并且安全。",
+        "Дверь соответствует нормам и безопасна.",
+        "p_a_s_s",
+        "p＿a＿s＿s",
+        "pаss",
+        "This does not apply.",
+        "The metadata is complete.",
+        "The requirement is fulfilled.",
+        "There is enough room.",
+        "The opening meets the criterion.",
+        "The opening is sufficient.",
+        "The door is suitable for acceptance.",
+        "The result is a success.",
+        "The model fulfills the criteria.",
+        "The opening is nine hundred millimetres.",
+        "The opening is a dozen millimetres.",
+        "The opening is a pair of metres.",
+        "Check drawing ALPHA.",
+    ],
+)
+@pytest.mark.parametrize("field_name", ["summary", "missing_information", "next_action"])
+def test_rejects_every_noncanonical_narrative_in_every_field(
+    text: str,
+    field_name: str,
+) -> None:
+    payload = valid_explanation()
+    payload[field_name] = [text] if field_name == "missing_information" else text
+
+    with pytest.raises(ExplanationUnavailable, match="controlled"):
+        validate_explanation(payload, make_fail_result())
 
 
 def test_request_uses_precise_responses_api_kwargs_and_returns_separate_draft() -> None:
@@ -285,18 +474,40 @@ def test_request_uses_precise_responses_api_kwargs_and_returns_separate_draft() 
     assert call["model"] == "gpt-test"
     assert isinstance(call["instructions"], str) and call["instructions"]
     assert call["input"] == build_explanation_input(result, "EXPLAIN_RESULT")
-    schema = call["text"]["format"]
-    assert schema == {
-        "type": "json_schema",
-        "name": "explanation_draft",
-        "schema": json.loads(
-            (Path(__file__).parents[1] / "prompts/runtime/output.schema.json").read_text(
-                encoding="utf-8"
-            )
-        ),
-        "strict": True,
-    }
+    text_format = call["text"]["format"]
+    assert set(text_format) == {"type", "name", "schema", "strict"}
+    assert text_format["type"] == "json_schema"
+    assert text_format["name"] == "explanation_draft"
+    assert text_format["strict"] is True
+    assert text_format["schema"]["required"] == [
+        "summary",
+        "evidence_refs",
+        "missing_information",
+        "next_action",
+    ]
     assert to_primitive(result) == to_primitive(make_fail_result())
+
+
+def test_outbound_schema_omits_every_unsupported_strict_keyword() -> None:
+    client = FakeClient(completed_response(valid_explanation()))
+
+    request_explanation(make_fail_result(), "EXPLAIN_RESULT", client=client, model_name="gpt-test")
+
+    outbound_schema = client.responses.calls[0]["text"]["format"]["schema"]
+    unsupported = {"$schema", "minLength", "maxLength", "uniqueItems"}
+
+    def assert_supported(value: object) -> None:
+        if isinstance(value, dict):
+            assert unsupported.isdisjoint(value)
+            for child in value.values():
+                assert_supported(child)
+        elif isinstance(value, list):
+            for child in value:
+                assert_supported(child)
+
+    assert_supported(outbound_schema)
+    assert outbound_schema["properties"]["summary"]["enum"]
+    assert outbound_schema["properties"]["evidence_refs"]["maxItems"] == 20
 
 
 @pytest.mark.parametrize("mode", VALID_MODES)
@@ -306,6 +517,24 @@ def test_request_accepts_all_three_modes(mode: str) -> None:
     request_explanation(make_fail_result(), mode, client=client, model_name="gpt-test")
 
     assert f"MODE: {mode}" in client.responses.calls[0]["input"]
+
+
+def test_missing_evidence_mode_accepts_matching_controlled_r2_output() -> None:
+    result = make_result(
+        rule_id="R2_EGRESS_DOOR_METADATA_COMPLETENESS",
+        status=EngineStatus.FAIL,
+        finding_code="FIRE_RATING_MISSING",
+    )
+    client = FakeClient(completed_response(metadata_missing_explanation()))
+
+    draft = request_explanation(
+        result,
+        "EXPLAIN_MISSING_EVIDENCE",
+        client=client,
+        model_name="gpt-test",
+    )
+
+    assert draft.next_action == "Verify the FireRating property and source in the authoring model."
 
 
 @pytest.mark.parametrize(
@@ -322,6 +551,12 @@ def test_request_accepts_all_three_modes(mode: str) -> None:
             output=[],
             output_text=json.dumps(valid_explanation()),
             refusal="No",
+        ),
+        SimpleNamespace(
+            status="completed",
+            output=[],
+            output_text=json.dumps(valid_explanation()),
+            error={"message": "provider detail"},
         ),
         SimpleNamespace(status="completed", output=[], output_text=""),
         SimpleNamespace(status="completed", output=[], output_text="   "),
@@ -343,6 +578,7 @@ def test_request_accepts_all_three_modes(mode: str) -> None:
         "incomplete",
         "output-refusal",
         "top-level-refusal",
+        "completed-with-error",
         "empty",
         "whitespace",
         "missing-output",
@@ -361,6 +597,49 @@ def test_response_failure_modes_raise_safe_unavailable(response: object) -> None
     assert "AI explanation unavailable" in str(caught.value)
     assert caught.value.__cause__ is None
     assert to_primitive(result) == before
+
+
+def test_rejects_oversized_utf8_output_before_parsing() -> None:
+    payload = valid_explanation()
+    payload["summary"] = "界" * 6000
+    client = FakeClient(
+        SimpleNamespace(
+            status="completed",
+            output=[],
+            output_text=json.dumps(payload, ensure_ascii=False),
+        )
+    )
+
+    with pytest.raises(ExplanationUnavailable, match="size") as caught:
+        request_explanation(make_fail_result(), "EXPLAIN_RESULT", client=client, model_name="gpt-test")
+
+    assert caught.value.__cause__ is None
+
+
+def test_deeply_nested_json_is_converted_to_safe_unavailable() -> None:
+    deeply_nested_json = "[" * 1100 + "0" + "]" * 1100
+    client = FakeClient(
+        SimpleNamespace(status="completed", output=[], output_text=deeply_nested_json)
+    )
+
+    with pytest.raises(ExplanationUnavailable) as caught:
+        request_explanation(make_fail_result(), "EXPLAIN_RESULT", client=client, model_name="gpt-test")
+
+    assert caught.value.__cause__ is None
+
+
+def test_validation_recursion_is_converted_to_safe_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def recurse(_validator: object, _payload: object) -> None:
+        raise RecursionError("provider-controlled nesting")
+
+    monkeypatch.setattr(Draft202012Validator, "validate", recurse)
+
+    with pytest.raises(ExplanationUnavailable) as caught:
+        validate_explanation(valid_explanation(), make_fail_result())
+
+    assert caught.value.__cause__ is None
 
 
 def test_service_errors_are_wrapped_without_raw_details() -> None:

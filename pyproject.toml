@@ -20,6 +20,11 @@ dev = ["pytest==9.0.2", "ruff==0.16.5"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.setuptools.packages.find]
+include = ["bim_preflight*"]
+
+[tool.setuptools.package-data]
+"bim_preflight.prompt_assets" = ["*.md", "*.json"]
+
 [tool.ruff]
 line-length = 100
-

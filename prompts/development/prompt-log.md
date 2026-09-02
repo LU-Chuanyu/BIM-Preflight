@@ -9,3 +9,16 @@
   schema validation, evidence provenance, semantic rejection, and safe failure behavior.
 - Live model validation: not performed. No live model run is recorded. Fake-client tests are not
   live model validation.
+
+## Runtime explanation contract v2
+
+- Replaced open-ended narrative generation and pattern filtering with exact English canonical
+  sentence enums. Runtime validation narrows those choices to the supplied rule, finding code,
+  status, and evidenced deficiencies.
+- Added synchronized package resources for wheel installations and a structural outbound schema
+  that omits keywords unsupported by the OpenAI strict-schema subset while retaining the full
+  Draft 2020-12 schema locally.
+- Added local fake-client coverage for multilingual and confusable bypasses, response errors,
+  UTF-8 size limits, recursive input, and installed-resource behavior.
+- Live model validation: not performed. No live model run is recorded. Fake-client tests and the
+  package smoke test are not live model validation.
