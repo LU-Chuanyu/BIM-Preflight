@@ -1,6 +1,7 @@
 """Credential-free Streamlit integration tests for the dashboard."""
 
 from pathlib import Path
+from shutil import copyfile
 from typing import Self
 
 import pytest
@@ -206,9 +207,14 @@ def test_invalid_ifc_is_rendered_as_a_typed_file_error(monkeypatch: pytest.Monke
     assert any(error.value == "Unable to load IFC file." for error in app.error)
 
 
-def test_missing_demo_file_is_a_visible_unavailable_state(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_demo_file_is_a_visible_unavailable_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Catches a fake bundled model or an unhandled missing sample path."""
-    app = _app(monkeypatch)
+    isolated_app = tmp_path / "app.py"
+    copyfile(APP_PATH, isolated_app)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    app = AppTest.from_file(isolated_app, default_timeout=10).run()
     app.radio(key="input_source").set_value("Bundled synthetic demo")
     app.button(key="run_preflight").click()
     app.run()
