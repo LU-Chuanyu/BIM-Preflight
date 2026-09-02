@@ -13,7 +13,6 @@ from bim_preflight.engine import IfcLoadError, analyse_ifc
 from bim_preflight.explain import ExplanationDraft, ExplanationUnavailable, request_explanation
 from bim_preflight.models import AnalysisReport, EngineStatus, RuleResult
 from bim_preflight.presentation import (
-    STATUS_COLORS,
     STATUS_MARKERS,
     evidence_rows,
     result_rows,
@@ -87,14 +86,20 @@ def _clear_analysis() -> None:
     st.session_state.pop("analysis_fingerprint", None)
     st.session_state.pop("explanation_state", None)
     st.session_state.pop("selected_finding", None)
+    st.session_state.pop("finding_selector", None)
 
 
 def _input_fingerprint(source: str, threshold_mm: float, upload: object) -> tuple[object, ...]:
     """Identify exactly the inputs that would make a stored report stale."""
     if source == "Upload IFC":
         content = b"" if upload is None else upload.getvalue()
-        return source, float(threshold_mm), sha256(content).hexdigest()
-    return source, float(threshold_mm), str(DEMO_PATH)
+        name = "" if upload is None else upload.name
+        return source, float(threshold_mm), name, sha256(content).hexdigest()
+    try:
+        demo_digest = sha256(DEMO_PATH.read_bytes()).hexdigest()
+    except OSError:
+        demo_digest = "unavailable"
+    return source, float(threshold_mm), str(DEMO_PATH), demo_digest
 
 
 def _threshold_label(source: str, threshold_m: float) -> str:
@@ -119,6 +124,7 @@ def _store_analysis(
     st.session_state.analysis_threshold_m = threshold_m
     st.session_state.pop("explanation_state", None)
     st.session_state.pop("selected_finding", None)
+    st.session_state.pop("finding_selector", None)
 
 
 def _show_explanation(draft: ExplanationDraft) -> None:
@@ -207,9 +213,8 @@ def _render_report(
         st.session_state.pop("explanation_state", None)
     st.session_state.selected_finding = selected_key
     st.markdown(
-        f"<span style='color:{STATUS_COLORS[selected_result.status]};font-weight:700'>"
-        f"{selected_result.status.value}</span> · {selected_result.finding_code}",
-        unsafe_allow_html=True,
+        f"{STATUS_MARKERS[selected_result.status]} **{selected_result.status.value}** · "
+        f"`{selected_result.finding_code}`"
     )
     st.write(selected_result.message)
 
@@ -255,7 +260,9 @@ def main() -> None:
         step=1,
         key="threshold_mm",
     )
-    st.caption(f"{DEMO_PROFILE}: 900 mm (default control value)")
+    st.caption(
+        "Default threshold: 900 mm. The bundled synthetic demo uses the Demo project screening profile."
+    )
 
     fingerprint = _input_fingerprint(source, threshold_mm, upload)
     stored_fingerprint = st.session_state.get("analysis_fingerprint")

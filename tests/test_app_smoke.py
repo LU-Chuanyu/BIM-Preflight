@@ -41,8 +41,8 @@ def _zero_door_ifc_bytes(tmp_path: Path) -> bytes:
     return path.read_bytes()
 
 
-def _upload_and_run(app: AppTest, data: bytes) -> AppTest:
-    app.file_uploader(key="ifc_upload").set_value(("doors.ifc", data, "application/x-step"))
+def _upload_and_run(app: AppTest, data: bytes, *, name: str = "doors.ifc") -> AppTest:
+    app.file_uploader(key="ifc_upload").set_value((name, data, "application/x-step"))
     app.run()
     app.button(key="run_preflight").click()
     return app.run()
@@ -148,6 +148,50 @@ def test_switching_source_or_replacing_same_named_upload_clears_the_previous_rep
     app.run()
     assert app.dataframe == []
 
+
+def test_replacing_identical_upload_bytes_under_a_new_name_clears_report_and_selector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a fingerprint that treats two different uploaded artefacts as the same input."""
+    data = _ifc_bytes(tmp_path)
+    app = _upload_and_run(_app(monkeypatch), data, name="first.ifc")
+    selector = app.selectbox(key="finding_selector")
+    selector.set_value(next(value for value in selector.options if "R2_" in value))
+    app.run()
+
+    app.file_uploader(key="ifc_upload").set_value(("second.ifc", data, "application/x-step"))
+    app.run()
+
+    assert app.dataframe == []
+    assert app.selectbox == []
+
+    app.button(key="run_preflight").click()
+    app.run()
+    assert app.exception == []
+    assert "R1_EGRESS_DOOR_OPENING_WIDTH" in app.selectbox(key="finding_selector").value
+
+
+def test_demo_fingerprint_uses_content_when_available_and_a_stable_missing_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a demo fingerprint based only on a path that can be replaced in place."""
+    import app as app_module
+    from app import _input_fingerprint
+
+    demo_path = tmp_path / "demo.ifc"
+    demo_path.write_bytes(b"first demo")
+    monkeypatch.setattr(app_module, "DEMO_PATH", demo_path)
+    first = _input_fingerprint("Bundled synthetic demo", 900, None)
+    demo_path.write_bytes(b"second demo")
+    second = _input_fingerprint("Bundled synthetic demo", 900, None)
+    demo_path.unlink()
+    missing_one = _input_fingerprint("Bundled synthetic demo", 900, None)
+    missing_two = _input_fingerprint("Bundled synthetic demo", 900, None)
+
+    assert first != second
+    assert missing_one == missing_two
+    assert "unavailable" in missing_one
+
     app = _upload_and_run(_app(monkeypatch), _ifc_bytes(tmp_path))
     app.radio(key="input_source").set_value("Bundled synthetic demo")
     app.run()
@@ -201,6 +245,29 @@ def test_finding_selection_uses_the_requested_rule_and_global_id(tmp_path: Path,
     assert app.selectbox(key="finding_selector").value == metadata_label
     assert "R2_EGRESS_DOOR_METADATA_COMPLETENESS" in metadata_label
     assert "GlobalId=" in metadata_label
+
+
+def test_selected_status_uses_a_trusted_marker_without_unsafe_colored_html(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a fixed text colour that can disappear under an application theme."""
+    app = _upload_and_run(_app(monkeypatch), _ifc_bytes(tmp_path))
+    status_copy = " ".join(markdown.value for markdown in app.markdown if "WIDTH_MEETS" in markdown.value)
+
+    assert "<span" not in status_copy
+    assert "🟢" in status_copy
+    assert "PASS" in status_copy
+
+
+def test_control_caption_is_neutral_about_the_demo_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Catches an upload control being described as though it were always the bundled demo."""
+    app = _app(monkeypatch)
+
+    assert any(
+        caption.value
+        == "Default threshold: 900 mm. The bundled synthetic demo uses the Demo project screening profile."
+        for caption in app.caption
+    )
 
 
 def test_explanation_draft_is_not_rendered_after_selecting_another_finding(
