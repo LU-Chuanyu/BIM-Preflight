@@ -13,12 +13,15 @@
       "minLength": 1,
       "maxLength": 120,
       "enum": [
-        "The finding concerns the door's FireExit classification.",
-        "The finding concerns the model-declared door-opening width proxy.",
+        "The check is not applicable because FireExit is explicitly false.",
+        "The check cannot determine applicability because FireExit is unresolved.",
+        "The model-declared opening-width proxy is at or above the configured screening threshold.",
+        "The model-declared opening-width proxy is below the configured screening threshold.",
         "The finding concerns unavailable model-declared opening-width information.",
         "The finding concerns unusable model-declared opening-width information.",
         "The finding concerns an interrupted opening-width screening check.",
-        "The finding concerns FireRating and SelfClosing metadata.",
+        "The metadata completeness check found a non-empty FireRating label and a readable SelfClosing boolean.",
+        "The metadata completeness check found FireRating or SelfClosing missing or unreadable.",
         "The finding concerns an interrupted metadata completeness check.",
         "The response identifies the next manual source-model check for this finding."
       ]

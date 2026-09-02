@@ -9,8 +9,10 @@ only missing_information items that are directly supported by the supplied findi
 inputs_used; otherwise return an empty list. Select evidence references only when they appear
 exactly in the supplied engine result.
 
-For EXPLAIN_RESULT, select the rule-appropriate summary and next action and return an empty
-missing_information list. EXPLAIN_MISSING_EVIDENCE is applicable only when the supplied result
+For EXPLAIN_RESULT, select the exact summary for the supplied status and finding_code; never reuse
+a pass, fail, not-applicable, or unresolved summary for a different outcome. Select the
+rule-appropriate next action and return an empty missing_information list.
+EXPLAIN_MISSING_EVIDENCE is applicable only when the supplied result
 has supported deficiencies; return every supported deficiency item exactly once, in any order.
 For RECOMMEND_NEXT_MANUAL_CHECK, use "The response identifies the next manual source-model check
 for this finding." as summary, select the most specific supported manual check, and return an empty

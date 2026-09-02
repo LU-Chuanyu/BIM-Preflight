@@ -163,8 +163,11 @@ The deterministic engine is the sole authority for status, applicability, identi
 measurements, conversions, threshold, deficiencies, and provenance. The model receives a JSON
 projection of one frozen `RuleResult` and may return only `summary`, `evidence_refs`,
 `missing_information`, and `next_action`. Local validation enforces the exact schema, narrows
-controlled-language selections to the supplied result, and requires every evidence reference to
-come from that result. Explanation modes are enforced locally, and the missing-evidence action is
+controlled-language selections to the supplied result, including distinct summaries for width
+pass/fail, metadata complete/incomplete, and explicit non-egress/unresolved applicability. The
+metadata-complete summary states only that `FireRating` is non-empty and `SelfClosing` is readable;
+it does not claim that either value is adequate. Every evidence reference must come from the
+supplied result. Explanation modes are enforced locally, and the missing-evidence action is
 available only when the controlled result profile contains missing, invalid, or diagnostic
 information; the manual-check mode uses distinct fixed summary framing. Rejected, unavailable, or
 malformed output is discarded and leaves the finding unchanged.

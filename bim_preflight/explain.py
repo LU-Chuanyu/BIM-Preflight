@@ -29,14 +29,28 @@ _SAFE_UNAVAILABLE = "AI explanation unavailable; the deterministic finding remai
 _WIDTH_RULE_ID = "R1_EGRESS_DOOR_OPENING_WIDTH"
 _METADATA_RULE_ID = "R2_EGRESS_DOOR_METADATA_COMPLETENESS"
 
-_SUMMARY_FIRE_EXIT = "The finding concerns the door's FireExit classification."
-_SUMMARY_WIDTH = "The finding concerns the model-declared door-opening width proxy."
+_SUMMARY_FIRE_EXIT_FALSE = "The check is not applicable because FireExit is explicitly false."
+_SUMMARY_FIRE_EXIT_UNRESOLVED = (
+    "The check cannot determine applicability because FireExit is unresolved."
+)
+_SUMMARY_WIDTH_PASS = (
+    "The model-declared opening-width proxy is at or above the configured screening threshold."
+)
+_SUMMARY_WIDTH_FAIL = (
+    "The model-declared opening-width proxy is below the configured screening threshold."
+)
 _SUMMARY_WIDTH_MISSING = (
     "The finding concerns unavailable model-declared opening-width information."
 )
 _SUMMARY_WIDTH_UNUSABLE = "The finding concerns unusable model-declared opening-width information."
 _SUMMARY_WIDTH_ERROR = "The finding concerns an interrupted opening-width screening check."
-_SUMMARY_METADATA = "The finding concerns FireRating and SelfClosing metadata."
+_SUMMARY_METADATA_PASS = (
+    "The metadata completeness check found a non-empty FireRating label and a readable "
+    "SelfClosing boolean."
+)
+_SUMMARY_METADATA_FAIL = (
+    "The metadata completeness check found FireRating or SelfClosing missing or unreadable."
+)
 _SUMMARY_METADATA_ERROR = "The finding concerns an interrupted metadata completeness check."
 _SUMMARY_MANUAL_CHECK = (
     "The response identifies the next manual source-model check for this finding."
@@ -69,8 +83,8 @@ _WIDTH_DIAGNOSTICS = "Further diagnostic information for the opening-width check
 _METADATA_DIAGNOSTICS = "Further diagnostic information for the metadata check is unavailable."
 
 _R1_PROFILES = {
-    ("PASS", "WIDTH_MEETS_THRESHOLD"): (_SUMMARY_WIDTH, _ACTION_WIDTH, frozenset()),
-    ("FAIL", "WIDTH_BELOW_THRESHOLD"): (_SUMMARY_WIDTH, _ACTION_WIDTH, frozenset()),
+    ("PASS", "WIDTH_MEETS_THRESHOLD"): (_SUMMARY_WIDTH_PASS, _ACTION_WIDTH, frozenset()),
+    ("FAIL", "WIDTH_BELOW_THRESHOLD"): (_SUMMARY_WIDTH_FAIL, _ACTION_WIDTH, frozenset()),
     ("NOT_EVALUABLE", "WIDTH_MISSING"): (
         _SUMMARY_WIDTH_MISSING,
         _ACTION_WIDTH_SOURCE,
@@ -202,7 +216,7 @@ def build_explanation_input(result: RuleResult, mode: str) -> str:
 
 def _fire_exit_profile(result: RuleResult) -> tuple[str, str, frozenset[str]] | None:
     if result.finding_code == "FIRE_EXIT_FALSE" and result.status.value == "NOT_APPLICABLE":
-        return _SUMMARY_FIRE_EXIT, _ACTION_FIRE_EXIT, frozenset()
+        return _SUMMARY_FIRE_EXIT_FALSE, _ACTION_FIRE_EXIT, frozenset()
     if result.finding_code != "FIRE_EXIT_UNRESOLVED" or result.status.value != "NOT_EVALUABLE":
         return None
     state = dict(result.inputs_used).get("fire_exit_state")
@@ -212,7 +226,7 @@ def _fire_exit_profile(result: RuleResult) -> tuple[str, str, frozenset[str]] | 
         missing = _INVALID_FIRE_EXIT
     else:
         missing = _UNRESOLVED_FIRE_EXIT
-    return _SUMMARY_FIRE_EXIT, _ACTION_FIRE_EXIT, frozenset({missing})
+    return _SUMMARY_FIRE_EXIT_UNRESOLVED, _ACTION_FIRE_EXIT, frozenset({missing})
 
 
 def _controlled_profile(result: RuleResult) -> tuple[str, str, frozenset[str]]:
@@ -225,7 +239,7 @@ def _controlled_profile(result: RuleResult) -> tuple[str, str, frozenset[str]]:
         return _R1_PROFILES[key]
     if result.rule_id == _METADATA_RULE_ID:
         if key == ("PASS", "METADATA_COMPLETE"):
-            return _SUMMARY_METADATA, _ACTION_METADATA, frozenset()
+            return _SUMMARY_METADATA_PASS, _ACTION_METADATA, frozenset()
         if key == ("ERROR", "METADATA_RULE_EVALUATION_ERROR"):
             return (
                 _SUMMARY_METADATA_ERROR,
@@ -234,7 +248,7 @@ def _controlled_profile(result: RuleResult) -> tuple[str, str, frozenset[str]]:
             )
         if result.status.value == "FAIL" and result.finding_code in _METADATA_DEFICIENCIES:
             missing, action = _METADATA_DEFICIENCIES[result.finding_code]
-            return _SUMMARY_METADATA, action, missing
+            return _SUMMARY_METADATA_FAIL, action, missing
     raise _unavailable("controlled language profile unavailable")
 
 

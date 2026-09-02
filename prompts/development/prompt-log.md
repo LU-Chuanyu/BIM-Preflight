@@ -33,3 +33,12 @@
   diagnostic information. Fake-client and Streamlit AppTest regressions cover cross-mode rejection,
   pre-client failure, button state, and stale-output suppression.
 - Live model validation: not performed. No live model run is recorded.
+
+## Runtime explanation contract v4
+
+- Split the result-summary vocabulary across width pass/fail, metadata complete/incomplete, and
+  explicit non-egress/unresolved applicability outcomes. Local validation rejects reuse of a
+  controlled summary across those opposing findings.
+- The metadata-complete sentence describes only a non-empty `FireRating` label and a readable
+  `SelfClosing` boolean; it does not claim that either value proves adequate fire performance.
+- Live model validation: not performed. No live model run is recorded.

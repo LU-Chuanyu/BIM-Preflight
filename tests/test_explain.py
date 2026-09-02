@@ -29,6 +29,25 @@ VALID_MODES = (
 MANUAL_CHECK_SUMMARY = (
     "The response identifies the next manual source-model check for this finding."
 )
+WIDTH_PASS_SUMMARY = (
+    "The model-declared opening-width proxy is at or above the configured screening threshold."
+)
+WIDTH_FAIL_SUMMARY = (
+    "The model-declared opening-width proxy is below the configured screening threshold."
+)
+METADATA_PASS_SUMMARY = (
+    "The metadata completeness check found a non-empty FireRating label and a readable "
+    "SelfClosing boolean."
+)
+METADATA_FAIL_SUMMARY = (
+    "The metadata completeness check found FireRating or SelfClosing missing or unreadable."
+)
+FIRE_EXIT_FALSE_SUMMARY = (
+    "The check is not applicable because FireExit is explicitly false."
+)
+FIRE_EXIT_UNRESOLVED_SUMMARY = (
+    "The check cannot determine applicability because FireExit is unresolved."
+)
 
 
 def make_fail_result(*, element_name: str = "Door 1") -> RuleResult:
@@ -67,7 +86,7 @@ def make_result(
 
 def valid_explanation(*, evidence_refs: list[str] | None = None) -> dict[str, object]:
     return {
-        "summary": "The finding concerns the model-declared door-opening width proxy.",
+        "summary": WIDTH_FAIL_SUMMARY,
         "evidence_refs": ["door.d1.width"] if evidence_refs is None else evidence_refs,
         "missing_information": [],
         "next_action": "Review the model-declared opening-width source in the authoring model.",
@@ -76,7 +95,7 @@ def valid_explanation(*, evidence_refs: list[str] | None = None) -> dict[str, ob
 
 def metadata_missing_explanation() -> dict[str, object]:
     return {
-        "summary": "The finding concerns FireRating and SelfClosing metadata.",
+        "summary": METADATA_FAIL_SUMMARY,
         "evidence_refs": [],
         "missing_information": ["FireRating metadata is missing."],
         "next_action": "Verify the FireRating property and source in the authoring model.",
@@ -87,6 +106,15 @@ def manual_check_explanation() -> dict[str, object]:
     payload = valid_explanation()
     payload["summary"] = MANUAL_CHECK_SUMMARY
     return payload
+
+
+def explain_result_payload(*, summary: str, next_action: str) -> dict[str, object]:
+    return {
+        "summary": summary,
+        "evidence_refs": [],
+        "missing_information": [],
+        "next_action": next_action,
+    }
 
 
 class FakeResponses:
@@ -315,6 +343,98 @@ def test_result_and_manual_check_modes_require_distinct_controlled_payloads() ->
 
 
 @pytest.mark.parametrize(
+    ("first_result", "first_payload", "opposite_result", "opposite_payload"),
+    [
+        (
+            make_result(
+                rule_id="R1_EGRESS_DOOR_OPENING_WIDTH",
+                status=EngineStatus.PASS,
+                finding_code="WIDTH_MEETS_THRESHOLD",
+            ),
+            explain_result_payload(
+                summary=WIDTH_PASS_SUMMARY,
+                next_action=(
+                    "Review the model-declared opening-width source in the authoring model."
+                ),
+            ),
+            make_fail_result(),
+            explain_result_payload(
+                summary=WIDTH_FAIL_SUMMARY,
+                next_action=(
+                    "Review the model-declared opening-width source in the authoring model."
+                ),
+            ),
+        ),
+        (
+            make_result(
+                rule_id="R2_EGRESS_DOOR_METADATA_COMPLETENESS",
+                status=EngineStatus.PASS,
+                finding_code="METADATA_COMPLETE",
+            ),
+            explain_result_payload(
+                summary=METADATA_PASS_SUMMARY,
+                next_action=(
+                    "Review the FireRating and SelfClosing sources in the authoring model."
+                ),
+            ),
+            make_result(
+                rule_id="R2_EGRESS_DOOR_METADATA_COMPLETENESS",
+                status=EngineStatus.FAIL,
+                finding_code="FIRE_RATING_MISSING",
+            ),
+            explain_result_payload(
+                summary=METADATA_FAIL_SUMMARY,
+                next_action="Verify the FireRating property and source in the authoring model.",
+            ),
+        ),
+        (
+            make_result(
+                rule_id="R1_EGRESS_DOOR_OPENING_WIDTH",
+                status=EngineStatus.NOT_APPLICABLE,
+                finding_code="FIRE_EXIT_FALSE",
+            ),
+            explain_result_payload(
+                summary=FIRE_EXIT_FALSE_SUMMARY,
+                next_action="Verify the FireExit property and source in the authoring model.",
+            ),
+            make_result(
+                rule_id="R1_EGRESS_DOOR_OPENING_WIDTH",
+                status=EngineStatus.NOT_EVALUABLE,
+                finding_code="FIRE_EXIT_UNRESOLVED",
+                inputs_used=(("fire_exit_state", "MISSING"),),
+            ),
+            explain_result_payload(
+                summary=FIRE_EXIT_UNRESOLVED_SUMMARY,
+                next_action="Verify the FireExit property and source in the authoring model.",
+            ),
+        ),
+    ],
+    ids=["width-pass-vs-fail", "metadata-complete-vs-incomplete", "fire-exit-false-vs-unresolved"],
+)
+def test_explain_result_summary_cannot_be_reused_across_opposite_findings(
+    first_result: RuleResult,
+    first_payload: dict[str, object],
+    opposite_result: RuleResult,
+    opposite_payload: dict[str, object],
+) -> None:
+    first = validate_explanation(first_payload, first_result, "EXPLAIN_RESULT")
+    opposite = validate_explanation(opposite_payload, opposite_result, "EXPLAIN_RESULT")
+    assert first.summary != opposite.summary
+
+    for source_payload, target_result, target_payload in (
+        (first_payload, opposite_result, opposite_payload),
+        (opposite_payload, first_result, first_payload),
+    ):
+        with pytest.raises(ExplanationUnavailable):
+            validate_explanation(source_payload, target_result, "EXPLAIN_RESULT")
+
+        target_with_reused_summary = dict(target_payload)
+        target_with_reused_summary["summary"] = source_payload["summary"]
+        with pytest.raises(ExplanationUnavailable, match="controlled"):
+            validate_explanation(target_with_reused_summary, target_result, "EXPLAIN_RESULT")
+
+
+@pytest.mark.parametrize(
     "mode",
     ["EXPLAIN_RESULT", "RECOMMEND_NEXT_MANUAL_CHECK"],
 )
@@ -352,7 +472,7 @@ def test_missing_evidence_mode_requires_every_supported_deficiency() -> None:
         finding_code="METADATA_INCOMPLETE_FIRE_RATING_MISSING_SELF_CLOSING_INVALID",
     )
     payload = {
-        "summary": "The finding concerns FireRating and SelfClosing metadata.",
+        "summary": METADATA_FAIL_SUMMARY,
         "evidence_refs": [],
         "missing_information": [
             "SelfClosing metadata is invalid.",
@@ -592,7 +712,7 @@ def test_accepts_matching_unresolved_fire_exit_information() -> None:
         inputs_used=(("fire_exit_state", "MISSING"),),
     )
     payload = {
-        "summary": "The finding concerns the door's FireExit classification.",
+        "summary": FIRE_EXIT_UNRESOLVED_SUMMARY,
         "evidence_refs": [],
         "missing_information": ["FireExit classification is missing."],
         "next_action": "Verify the FireExit property and source in the authoring model.",
@@ -604,30 +724,53 @@ def test_accepts_matching_unresolved_fire_exit_information() -> None:
 
 
 @pytest.mark.parametrize(
-    "result",
+    ("result", "payload"),
     [
-        make_result(
-            rule_id="R1_EGRESS_DOOR_OPENING_WIDTH",
-            status=EngineStatus.PASS,
-            finding_code="WIDTH_MEETS_THRESHOLD",
+        (
+            make_result(
+                rule_id="R1_EGRESS_DOOR_OPENING_WIDTH",
+                status=EngineStatus.PASS,
+                finding_code="WIDTH_MEETS_THRESHOLD",
+            ),
+            explain_result_payload(
+                summary=WIDTH_PASS_SUMMARY,
+                next_action=(
+                    "Review the model-declared opening-width source in the authoring model."
+                ),
+            ),
         ),
-        make_fail_result(),
-        make_result(
-            rule_id="R1_EGRESS_DOOR_OPENING_WIDTH",
-            status=EngineStatus.NOT_APPLICABLE,
-            finding_code="FIRE_EXIT_FALSE",
+        (make_fail_result(), valid_explanation()),
+        (
+            make_result(
+                rule_id="R1_EGRESS_DOOR_OPENING_WIDTH",
+                status=EngineStatus.NOT_APPLICABLE,
+                finding_code="FIRE_EXIT_FALSE",
+            ),
+            explain_result_payload(
+                summary=FIRE_EXIT_FALSE_SUMMARY,
+                next_action="Verify the FireExit property and source in the authoring model.",
+            ),
         ),
-        make_result(
-            rule_id="R2_EGRESS_DOOR_METADATA_COMPLETENESS",
-            status=EngineStatus.PASS,
-            finding_code="METADATA_COMPLETE",
+        (
+            make_result(
+                rule_id="R2_EGRESS_DOOR_METADATA_COMPLETENESS",
+                status=EngineStatus.PASS,
+                finding_code="METADATA_COMPLETE",
+            ),
+            explain_result_payload(
+                summary=METADATA_PASS_SUMMARY,
+                next_action=(
+                    "Review the FireRating and SelfClosing sources in the authoring model."
+                ),
+            ),
         ),
     ],
 )
 def test_results_without_deficiencies_reject_invented_missing_information(
     result: RuleResult,
+    payload: dict[str, object],
 ) -> None:
-    payload = valid_explanation()
+    payload = dict(payload)
     payload["missing_information"] = ["OverallWidth is missing."]
 
     with pytest.raises(ExplanationUnavailable, match="controlled"):
@@ -641,7 +784,7 @@ def test_rejects_missing_information_that_does_not_match_finding_code() -> None:
         finding_code="SELF_CLOSING_INVALID",
     )
     payload = {
-        "summary": "The finding concerns FireRating and SelfClosing metadata.",
+        "summary": METADATA_FAIL_SUMMARY,
         "evidence_refs": [],
         "missing_information": ["FireRating metadata is missing."],
         "next_action": "Verify the SelfClosing property and source in the authoring model.",
@@ -653,7 +796,7 @@ def test_rejects_missing_information_that_does_not_match_finding_code() -> None:
 
 def test_rejects_rule_inappropriate_canonical_summary_and_action() -> None:
     payload = {
-        "summary": "The finding concerns FireRating and SelfClosing metadata.",
+        "summary": METADATA_PASS_SUMMARY,
         "evidence_refs": [],
         "missing_information": [],
         "next_action": "Review the FireRating and SelfClosing sources in the authoring model.",

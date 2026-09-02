@@ -17,8 +17,9 @@ deep copy of the local schema with unsupported annotation/validation keywords re
 types, required fields, closed object shape, enums, item schemas, and list bounds remain.
 
 The model output is never merged with or written back to the frozen engine result. Local code
-narrows the global enums to the selected rule result and permits only deficiencies supported by
-its finding code and inputs. It also enforces mode semantics locally: the missing-evidence mode is
+narrows the global enums to the selected rule result, requires outcome-specific result summaries,
+and permits only deficiencies supported by its finding code and inputs. It also enforces mode
+semantics locally: the missing-evidence mode is
 relevance-gated and must return the complete supported deficiency set, while the other modes must
 return no missing-information items; the manual-check mode also requires its own fixed summary
 framing. Rejected or unavailable explanations leave the deterministic finding unchanged.
