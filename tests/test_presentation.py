@@ -151,7 +151,7 @@ def test_evidence_rows_preserve_selected_door_order_and_do_not_leak_other_door(
     rows = evidence_rows(report, selected)
 
     assert [row["ref"] for row in rows[:2]] == ["door.d2.fire_exit", "door.d2.width"]
-    assert all("d1" not in row["ref"] for row in rows)
+    assert all(row["ref"] is None or "d1" not in row["ref"] for row in rows)
     assert rows[1] == {
         "ref": "door.d2.width",
         "property": "OverallWidth",
@@ -160,14 +160,72 @@ def test_evidence_rows_preserve_selected_door_order_and_do_not_leak_other_door(
         "unit": "MILLIMETRE",
         "normalized": None,
     }
+    assert rows[-2] == {
+        "ref": None,
+        "property": "Authoritative rule input: overall_width_m",
+        "source": "authoritative rule input",
+        "raw": 1.0,
+        "unit": "m",
+        "normalized": 1.0,
+    }
     assert rows[-1] == {
         "ref": "rule.threshold",
-        "property": "Rule input: threshold_m",
+        "property": "Rule configuration: threshold_m",
         "source": "rule configuration",
         "raw": 0.9,
         "unit": "m",
         "normalized": 0.9,
     }
+
+
+def test_evidence_rows_follow_result_reference_order_and_keep_r2_inputs_out_of_configuration(
+    report: AnalysisReport,
+) -> None:
+    """Catches set-based evidence ordering and treating every rule input as project configuration."""
+    selected = RuleResult(
+        rule_id=METADATA_RULE_ID,
+        rule_version="1.0.0",
+        element_global_id="d2",
+        element_name="Door d2",
+        status=EngineStatus.FAIL,
+        finding_code="FIRE_RATING_MISSING",
+        message="Required FireRating metadata is missing.",
+        evidence_refs=("door.d2.width", "door.d2.fire_exit"),
+        inputs_used=(("fire_rating", None), ("self_closing", False)),
+    )
+
+    rows = evidence_rows(report, selected)
+
+    assert [row["ref"] for row in rows[:2]] == ["door.d2.width", "door.d2.fire_exit"]
+    assert [row["source"] for row in rows[-2:]] == [
+        "authoritative rule input",
+        "authoritative rule input",
+    ]
+    assert all(row["ref"] is None for row in rows[-2:])
+
+
+def test_applicability_inputs_are_not_fabricated_as_door_evidence(report: AnalysisReport) -> None:
+    """Catches FireExit branch inputs being mislabeled as project configuration evidence."""
+    selected = RuleResult(
+        rule_id=WIDTH_RULE_ID,
+        rule_version="1.0.0",
+        element_global_id="d2",
+        element_name="Door d2",
+        status=EngineStatus.NOT_EVALUABLE,
+        finding_code="FIRE_EXIT_UNRESOLVED",
+        message="The door's FireExit classification is missing or invalid.",
+        evidence_refs=("door.d2.fire_exit",),
+        inputs_used=(
+            ("fire_exit_value", None),
+            ("fire_exit_state", "MISSING"),
+            ("fire_exit_source", "NONE"),
+        ),
+    )
+
+    rows = evidence_rows(report, selected)
+
+    assert [row["ref"] for row in rows] == ["door.d2.fire_exit", None, None, None]
+    assert all(row["source"] == "authoritative rule input" for row in rows[1:])
 
 
 def test_status_colors_cover_one_consistent_color_for_each_engine_status() -> None:

@@ -15,6 +15,14 @@ STATUS_COLORS: dict[EngineStatus, str] = {
     EngineStatus.ERROR: "#7E22CE",
 }
 
+STATUS_MARKERS: dict[EngineStatus, str] = {
+    EngineStatus.PASS: "🟢",
+    EngineStatus.FAIL: "🔴",
+    EngineStatus.NOT_EVALUABLE: "🟠",
+    EngineStatus.NOT_APPLICABLE: "⚪",
+    EngineStatus.ERROR: "🟣",
+}
+
 
 def result_rows(report: AnalysisReport) -> list[dict[str, str]]:
     """Return direct projections of every authoritative engine finding."""
@@ -92,34 +100,37 @@ def evidence_rows(report: AnalysisReport, result: RuleResult) -> list[dict[str, 
     door = next(
         (fact for fact in report.door_facts if fact.element_global_id == result.element_global_id), None
     )
-    references = set(result.evidence_refs)
     rows: list[dict[str, object]] = []
     if door is not None:
-        rows.extend(
-            {
-                "ref": evidence.ref,
-                "property": evidence.label,
-                "source": evidence.source,
-                "raw": evidence.raw_value,
-                "unit": evidence.unit,
-                "normalized": evidence.normalized_value,
-            }
-            for evidence in door.evidence
-            if evidence.ref in references
-        )
+        evidence_by_ref = {evidence.ref: evidence for evidence in door.evidence}
+        for reference in result.evidence_refs:
+            evidence = evidence_by_ref.get(reference)
+            if evidence is not None:
+                rows.append(
+                    {
+                        "ref": evidence.ref,
+                        "property": evidence.label,
+                        "source": evidence.source,
+                        "raw": evidence.raw_value,
+                        "unit": evidence.unit,
+                        "normalized": evidence.normalized_value,
+                    }
+                )
     for name, value in result.inputs_used:
-        configured_ref = next(
-            (reference for reference in result.evidence_refs if reference.endswith(name)),
-            next(
-                (reference for reference in result.evidence_refs if name == "threshold_m" and "threshold" in reference),
-                f"rule.{result.rule_id}.input.{name}",
-            ),
+        threshold_ref = next(
+            (reference for reference in result.evidence_refs if name == "threshold_m" and "threshold" in reference),
+            None,
         )
+        is_threshold = name == "threshold_m"
         rows.append(
             {
-                "ref": configured_ref,
-                "property": f"Rule input: {name}",
-                "source": "rule configuration",
+                "ref": threshold_ref if is_threshold else None,
+                "property": (
+                    f"Rule configuration: {name}"
+                    if is_threshold
+                    else f"Authoritative rule input: {name}"
+                ),
+                "source": "rule configuration" if is_threshold else "authoritative rule input",
                 "raw": value,
                 "unit": _input_unit(name),
                 "normalized": value,

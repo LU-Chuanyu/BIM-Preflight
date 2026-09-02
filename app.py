@@ -3,6 +3,7 @@
 import os
 from collections.abc import Callable
 from contextlib import contextmanager
+from hashlib import sha256
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -11,7 +12,13 @@ import streamlit as st
 from bim_preflight.engine import IfcLoadError, analyse_ifc
 from bim_preflight.explain import ExplanationDraft, ExplanationUnavailable, request_explanation
 from bim_preflight.models import AnalysisReport, EngineStatus, RuleResult
-from bim_preflight.presentation import STATUS_COLORS, evidence_rows, result_rows, width_plot
+from bim_preflight.presentation import (
+    STATUS_COLORS,
+    STATUS_MARKERS,
+    evidence_rows,
+    result_rows,
+    width_plot,
+)
 from bim_preflight.rules import RuleConfigurationError
 
 SCREENING_NOTICE = (
@@ -26,13 +33,15 @@ _AI_UNAVAILABLE = "AI actions are unavailable because OPENAI_API_KEY is not conf
 @contextmanager
 def temporary_ifc_path(data: bytes):
     """Write uploaded bytes to one named IFC path and remove it on every exit."""
-    with NamedTemporaryFile(suffix=".ifc", delete=False) as temporary_file:
-        temporary_file.write(data)
-        path = Path(temporary_file.name)
+    path: Path | None = None
     try:
+        with NamedTemporaryFile(suffix=".ifc", delete=False) as temporary_file:
+            path = Path(temporary_file.name)
+            temporary_file.write(data)
         yield path
     finally:
-        path.unlink(missing_ok=True)
+        if path is not None:
+            path.unlink(missing_ok=True)
 
 
 def analyse_uploaded_bytes(
@@ -61,10 +70,55 @@ def _display_rows(rows: list[dict[str, object]]) -> list[dict[str, str]]:
     ]
 
 
+def _result_display_rows(report: AnalysisReport) -> list[dict[str, str]]:
+    """Add a trusted, accessible status marker without changing engine-owned rows."""
+    rows: list[dict[str, str]] = []
+    for row in result_rows(report):
+        status = EngineStatus(row["status"])
+        rows.append({"status_indicator": STATUS_MARKERS[status], **row})
+    return rows
+
+
 def _clear_analysis() -> None:
     st.session_state.pop("analysis_report", None)
     st.session_state.pop("analysis_threshold_m", None)
-    st.session_state.pop("explanation_draft", None)
+    st.session_state.pop("analysis_source", None)
+    st.session_state.pop("analysis_source_kind", None)
+    st.session_state.pop("analysis_fingerprint", None)
+    st.session_state.pop("explanation_state", None)
+    st.session_state.pop("selected_finding", None)
+
+
+def _input_fingerprint(source: str, threshold_mm: float, upload: object) -> tuple[object, ...]:
+    """Identify exactly the inputs that would make a stored report stale."""
+    if source == "Upload IFC":
+        content = b"" if upload is None else upload.getvalue()
+        return source, float(threshold_mm), sha256(content).hexdigest()
+    return source, float(threshold_mm), str(DEMO_PATH)
+
+
+def _threshold_label(source: str, threshold_m: float) -> str:
+    threshold_mm = threshold_m * 1000
+    if source == "Bundled synthetic demo" and threshold_mm == 900:
+        return f"{DEMO_PROFILE}: 900 mm"
+    return f"Selected project screening threshold: {threshold_mm:g} mm"
+
+
+def _store_analysis(
+    report: AnalysisReport,
+    *,
+    source: str,
+    source_label: str,
+    fingerprint: tuple[object, ...],
+    threshold_m: float,
+) -> None:
+    st.session_state.analysis_report = report
+    st.session_state.analysis_source = source_label
+    st.session_state.analysis_source_kind = source
+    st.session_state.analysis_fingerprint = fingerprint
+    st.session_state.analysis_threshold_m = threshold_m
+    st.session_state.pop("explanation_state", None)
+    st.session_state.pop("selected_finding", None)
 
 
 def _show_explanation(draft: ExplanationDraft) -> None:
@@ -92,35 +146,54 @@ def _render_ai_panel(result: RuleResult) -> None:
         with column:
             if st.button(label, key=f"ai_{mode}", disabled=not has_api_key):
                 try:
-                    st.session_state.explanation_draft = request_explanation(result, mode)
+                    st.session_state.explanation_state = (
+                        (result.rule_id, result.element_global_id, mode),
+                        request_explanation(result, mode),
+                    )
                 except ExplanationUnavailable as error:
                     st.error(str(error))
-                    st.session_state.pop("explanation_draft", None)
-    draft = st.session_state.get("explanation_draft")
-    if isinstance(draft, ExplanationDraft):
+                    st.session_state.pop("explanation_state", None)
+    explanation_state = st.session_state.get("explanation_state")
+    if (
+        isinstance(explanation_state, tuple)
+        and len(explanation_state) == 2
+        and isinstance(explanation_state[0], tuple)
+        and len(explanation_state[0]) == 3
+        and explanation_state[0][:2] == (result.rule_id, result.element_global_id)
+        and isinstance(explanation_state[1], ExplanationDraft)
+    ):
+        draft = explanation_state[1]
         _show_explanation(draft)
 
 
-def _render_report(report: AnalysisReport, threshold_m: float) -> None:
+def _render_report(
+    report: AnalysisReport,
+    threshold_m: float,
+    source_kind: str,
+    source_label: str,
+) -> None:
     st.subheader("Model summary")
     st.write(
         {
             "schema": report.model_info.schema,
             "project_length_unit": report.model_info.length_unit or "Unavailable",
             "door_count": report.model_info.door_count,
-            "screening_profile": f"{DEMO_PROFILE}: {threshold_m * 1000:g} mm",
+            "analysed_source": source_label,
+            "screening_threshold": _threshold_label(source_kind, threshold_m),
         }
     )
 
-    metrics = st.columns(4)
+    metrics = st.columns(5)
     for column, status in zip(metrics, EngineStatus):
-        if status is EngineStatus.ERROR:
-            continue
         with column:
             st.metric(status.value, _status_count(report, status))
 
+    if not report.results:
+        st.info("No IfcDoor occurrences were found; no rules were evaluated.")
+        return
+
     st.subheader("Deterministic findings")
-    st.dataframe(result_rows(report), hide_index=True, key="result_rows")
+    st.dataframe(_result_display_rows(report), hide_index=True, key="result_rows")
 
     st.subheader("Opening-width evidence")
     st.plotly_chart(width_plot(report, threshold_m), width="stretch")
@@ -128,6 +201,11 @@ def _render_report(report: AnalysisReport, threshold_m: float) -> None:
     labels = [_finding_label(result) for result in report.results]
     selected_label = st.selectbox("Select finding", labels, key="finding_selector")
     selected_result = next(result for result in report.results if _finding_label(result) == selected_label)
+    selected_key = (selected_result.rule_id, selected_result.element_global_id)
+    previous_key = st.session_state.get("selected_finding")
+    if previous_key is not None and previous_key != selected_key:
+        st.session_state.pop("explanation_state", None)
+    st.session_state.selected_finding = selected_key
     st.markdown(
         f"<span style='color:{STATUS_COLORS[selected_result.status]};font-weight:700'>"
         f"{selected_result.status.value}</span> · {selected_result.finding_code}",
@@ -177,7 +255,12 @@ def main() -> None:
         step=1,
         key="threshold_mm",
     )
-    st.caption(DEMO_PROFILE)
+    st.caption(f"{DEMO_PROFILE}: 900 mm (default control value)")
+
+    fingerprint = _input_fingerprint(source, threshold_mm, upload)
+    stored_fingerprint = st.session_state.get("analysis_fingerprint")
+    if stored_fingerprint is not None and stored_fingerprint != fingerprint:
+        _clear_analysis()
 
     if st.button("Run preflight", type="primary", key="run_preflight"):
         threshold_m = float(threshold_mm) / 1000
@@ -188,17 +271,25 @@ def main() -> None:
                     st.info("Upload an IFC file before running preflight.")
                 else:
                     report = analyse_uploaded_bytes(upload.getvalue(), threshold_m)
-                    st.session_state.analysis_report = report
-                    st.session_state.analysis_threshold_m = threshold_m
-                    st.session_state.pop("explanation_draft", None)
+                    _store_analysis(
+                        report,
+                        source=source,
+                        source_label=f"Uploaded IFC: {upload.name}",
+                        fingerprint=fingerprint,
+                        threshold_m=threshold_m,
+                    )
             elif not DEMO_PATH.is_file():
                 _clear_analysis()
                 st.info("Bundled synthetic demo is not available yet.")
             else:
                 report = analyse_ifc(DEMO_PATH, threshold_m)
-                st.session_state.analysis_report = report
-                st.session_state.analysis_threshold_m = threshold_m
-                st.session_state.pop("explanation_draft", None)
+                _store_analysis(
+                    report,
+                    source=source,
+                    source_label="Bundled synthetic demo",
+                    fingerprint=fingerprint,
+                    threshold_m=threshold_m,
+                )
         except IfcLoadError as error:
             _clear_analysis()
             st.error(str(error))
@@ -208,8 +299,15 @@ def main() -> None:
 
     report = st.session_state.get("analysis_report")
     threshold_m = st.session_state.get("analysis_threshold_m")
-    if isinstance(report, AnalysisReport) and isinstance(threshold_m, float):
-        _render_report(report, threshold_m)
+    analysed_source = st.session_state.get("analysis_source")
+    analysed_source_kind = st.session_state.get("analysis_source_kind")
+    if (
+        isinstance(report, AnalysisReport)
+        and isinstance(threshold_m, float)
+        and isinstance(analysed_source, str)
+        and isinstance(analysed_source_kind, str)
+    ):
+        _render_report(report, threshold_m, analysed_source_kind, analysed_source)
     else:
         st.info("Upload an IFC file and select Run preflight to start.")
     _render_methods()
