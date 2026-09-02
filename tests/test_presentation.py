@@ -1,0 +1,180 @@
+"""Pure rendering-data tests for the evidence dashboard."""
+
+from math import nan
+
+import pytest
+
+from bim_preflight.models import (
+    AnalysisReport,
+    DoorFact,
+    EngineStatus,
+    Evidence,
+    ModelInfo,
+    PropertySource,
+    ResolvedValue,
+    RuleResult,
+    ValueState,
+)
+from bim_preflight.presentation import STATUS_COLORS, evidence_rows, result_rows, width_plot
+from bim_preflight.rules import METADATA_RULE_ID, WIDTH_RULE_ID
+
+
+def _resolved(key: str, value: object) -> ResolvedValue:
+    return ResolvedValue(
+        key=key,
+        state=ValueState.PRESENT,
+        value=value,
+        source=PropertySource.OCCURRENCE,
+        evidence_refs=(f"door.d1.occurrence.{key}",),
+    )
+
+
+def _door(global_id: str, width_m: float | None) -> DoorFact:
+    return DoorFact(
+        element_global_id=global_id,
+        display_name=f"Door {global_id}",
+        ifc_schema="IFC4",
+        fire_exit=_resolved("FireExit", True),
+        fire_rating=_resolved("FireRating", "60 min"),
+        self_closing=_resolved("SelfClosing", False),
+        overall_width_raw=None if width_m is None else width_m * 1000,
+        overall_width_m=width_m,
+        evidence=(
+            Evidence(
+                ref=f"door.{global_id}.fire_exit",
+                label="Pset_DoorCommon.FireExit",
+                raw_value=True,
+                normalized_value=True,
+                unit=None,
+                source="occurrence",
+            ),
+            Evidence(
+                ref=f"door.{global_id}.width",
+                label="OverallWidth",
+                raw_value=None if width_m is None else width_m * 1000,
+                normalized_value=width_m,
+                unit="MILLIMETRE",
+                source="occurrence",
+            ),
+        ),
+    )
+
+
+def _result(
+    global_id: str,
+    status: EngineStatus,
+    *,
+    rule_id: str = WIDTH_RULE_ID,
+) -> RuleResult:
+    return RuleResult(
+        rule_id=rule_id,
+        rule_version="1.0.0",
+        element_global_id=global_id,
+        element_name=f"Door {global_id}",
+        status=status,
+        finding_code=f"{status.value}_CODE",
+        message=f"{status.value} engine message.",
+        evidence_refs=(f"door.{global_id}.fire_exit", f"door.{global_id}.width", "rule.threshold"),
+        inputs_used=(("overall_width_m", 1.0), ("threshold_m", 0.9)),
+    )
+
+
+@pytest.fixture
+def report() -> AnalysisReport:
+    statuses = tuple(EngineStatus)
+    doors = tuple(_door(f"d{index}", 1.0 if status is EngineStatus.PASS else None) for index, status in enumerate(statuses, 1))
+    results = tuple(_result(door.element_global_id, status) for door, status in zip(doors, statuses))
+    return AnalysisReport(
+        model_info=ModelInfo(schema="IFC4", length_unit="MILLIMETRE", door_count=len(doors)),
+        door_facts=doors,
+        results=results,
+    )
+
+
+def test_result_rows_keep_all_engine_owned_fields_for_every_status(report: AnalysisReport) -> None:
+    """Catches table code dropping error or non-verdict engine outcomes."""
+    rows = result_rows(report)
+
+    assert {row["status"] for row in rows} == {status.value for status in EngineStatus}
+    assert rows[0] == {
+        "rule_id": WIDTH_RULE_ID,
+        "status": "PASS",
+        "finding_code": "PASS_CODE",
+        "element_name": "Door d1",
+        "global_id": "d1",
+        "message": "PASS engine message.",
+    }
+
+
+def test_width_plot_contains_only_finite_positive_r1_pass_fail_measurements(
+    report: AnalysisReport,
+) -> None:
+    """Catches non-evaluable outcomes leaking into the measured-width plot."""
+    altered_results = list(report.results)
+    altered_results[1] = _result("d2", EngineStatus.FAIL)
+    altered_doors = list(report.door_facts)
+    altered_doors[1] = _door("d2", 0.8)
+    altered_doors[2] = _door("d3", nan)
+    figure = width_plot(
+        AnalysisReport(report.model_info, tuple(altered_doors), tuple(altered_results)), threshold_m=0.9
+    )
+
+    assert figure.layout.xaxis.title.text == "Model-declared opening width (m)"
+    assert sorted(value for trace in figure.data for value in trace.x) == [0.8, 1.0]
+    assert len(figure.layout.shapes) == 1
+    assert figure.layout.shapes[0].x0 == 0.9
+    assert figure.layout.annotations[0].text == "Project threshold: 0.900 m"
+
+
+def test_width_plot_ignores_r2_results_even_when_their_door_has_a_width(report: AnalysisReport) -> None:
+    """Catches duplicated dots when both rules are rendered as measurements."""
+    report = AnalysisReport(
+        report.model_info,
+        report.door_facts,
+        (
+            _result("d1", EngineStatus.PASS),
+            _result("d1", EngineStatus.FAIL, rule_id=METADATA_RULE_ID),
+        ),
+    )
+
+    figure = width_plot(report, threshold_m=0.9)
+
+    assert [value for trace in figure.data for value in trace.x] == [1.0]
+
+
+def test_evidence_rows_preserve_selected_door_order_and_do_not_leak_other_door(
+    report: AnalysisReport,
+) -> None:
+    """Catches evidence lookup by shared property name instead of GlobalId and result references."""
+    selected = _result("d2", EngineStatus.FAIL)
+
+    rows = evidence_rows(report, selected)
+
+    assert [row["ref"] for row in rows[:2]] == ["door.d2.fire_exit", "door.d2.width"]
+    assert all("d1" not in row["ref"] for row in rows)
+    assert rows[1] == {
+        "ref": "door.d2.width",
+        "property": "OverallWidth",
+        "source": "occurrence",
+        "raw": None,
+        "unit": "MILLIMETRE",
+        "normalized": None,
+    }
+    assert rows[-1] == {
+        "ref": "rule.threshold",
+        "property": "Rule input: threshold_m",
+        "source": "rule configuration",
+        "raw": 0.9,
+        "unit": "m",
+        "normalized": 0.9,
+    }
+
+
+def test_status_colors_cover_one_consistent_color_for_each_engine_status() -> None:
+    """Catches a new status rendering without a documented visual treatment."""
+    assert set(STATUS_COLORS) == set(EngineStatus)
+    assert STATUS_COLORS[EngineStatus.PASS] == "#2E7D32"
+    assert STATUS_COLORS[EngineStatus.FAIL] == "#C62828"
+    assert STATUS_COLORS[EngineStatus.NOT_EVALUABLE] == "#B26A00"
+    assert STATUS_COLORS[EngineStatus.NOT_APPLICABLE] == "#6B7280"
+    assert STATUS_COLORS[EngineStatus.ERROR] == "#7E22CE"
