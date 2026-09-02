@@ -372,5 +372,5 @@ def test_methods_copy_keeps_r2_in_its_metadata_only_scope(monkeypatch: pytest.Mo
     copy = " ".join(markdown.value for markdown in app.markdown)
 
     assert "R2 checks metadata presence only" in copy
-    assert "SelfClosing=false counts as present" in copy
+    assert "SelfClosing = FALSE counts as present" in copy
     assert "No legal, fire-code, or installed-performance conclusion" in copy

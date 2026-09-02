@@ -1,9 +1,11 @@
 """End-to-end checks for the reproducible IFC release samples."""
 
 import json
+from hashlib import sha256
 from pathlib import Path
 
 import ifcopenshell
+import ifcopenshell.validate
 from streamlit.testing.v1 import AppTest
 
 from bim_preflight.engine import analyse_ifc
@@ -14,7 +16,10 @@ from scripts.generate_demo_ifc import generate_demo_ifc
 ROOT = Path(__file__).parents[1]
 DEMO_PATH = ROOT / "samples" / "demo-egress-doors.ifc"
 OFFICIAL_PATH = ROOT / "samples" / "official" / "Building-Architecture.ifc"
+OFFICIAL_LICENSE_PATH = ROOT / "samples" / "official" / "LICENSE-CC-BY-4.0.txt"
 APP_PATH = ROOT / "app.py"
+OFFICIAL_SHA256 = "3ff9b10bd00c7b96dded51e7ca5a6b69efbea38b049adcdd05fcd247de7e70d5"
+OFFICIAL_LICENSE_SHA256 = "3e20c50b6edfdb4be207f64495586115d0574c8394538109d74f79e1d8976d18"
 
 EXPECTED_RESULTS = {
     "01 Width Pass": {
@@ -98,6 +103,16 @@ def test_generator_reproduces_committed_ifc_bytes_and_fixed_header(tmp_path: Pat
     assert all(len(root.GlobalId) == 22 for root in roots)
 
 
+def test_demo_ifc_passes_schema_and_express_validation() -> None:
+    """Catches a generated sample that parses but violates IFC4 schema or EXPRESS rules."""
+    model = ifcopenshell.open(str(DEMO_PATH))
+    logger = ifcopenshell.validate.json_logger()
+
+    ifcopenshell.validate.validate(model, logger, express_rules=True)
+
+    assert logger.statements == []
+
+
 def test_official_buildingsmart_sample_is_parser_smoke_data_only() -> None:
     """Catches a missing, substituted, or unreadable official IFC parser fixture."""
     model = ifcopenshell.open(str(OFFICIAL_PATH))
@@ -105,6 +120,25 @@ def test_official_buildingsmart_sample_is_parser_smoke_data_only() -> None:
     assert model.schema == "IFC4"
     assert len(model.by_type("IfcProject")) == 1
     assert len(model.by_type("IfcBuilding")) >= 1
+
+
+def test_official_sample_and_license_match_documented_sha256() -> None:
+    """Catches offline modification of either byte-exact attributed upstream artifact."""
+    assert sha256(OFFICIAL_PATH.read_bytes()).hexdigest() == OFFICIAL_SHA256
+    assert sha256(OFFICIAL_LICENSE_PATH.read_bytes()).hexdigest() == OFFICIAL_LICENSE_SHA256
+
+
+def test_demo_source_hides_upload_widget_and_identifies_bundled_data(monkeypatch) -> None:
+    """Catches an irrelevant disabled uploader obscuring the selected bundled workflow."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    app = AppTest.from_file(APP_PATH, default_timeout=15).run()
+
+    app.radio(key="input_source").set_value("Bundled synthetic demo")
+    app.run()
+
+    assert app.exception == []
+    assert app.file_uploader == []
+    assert any("bundled" in caption.value.lower() for caption in app.caption)
 
 
 def test_bundled_demo_runs_in_streamlit_without_ai_credentials(monkeypatch) -> None:
@@ -128,3 +162,8 @@ def test_bundled_demo_runs_in_streamlit_without_ai_credentials(monkeypatch) -> N
         "NOT_APPLICABLE": "2",
         "ERROR": "0",
     }
+    result_table = app.dataframe[0].value
+    assert result_table.iloc[0]["element_name"] == "01 Width Pass"
+    assert result_table.iloc[0]["rule_id"] == WIDTH_RULE_ID
+    assert app.selectbox(key="finding_selector").value.endswith("01 Width Pass")
+    assert app.selectbox(key="finding_selector").value.startswith(WIDTH_RULE_ID)

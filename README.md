@@ -9,7 +9,7 @@ This project solves a narrow review problem: model issues such as a below-profil
 width proxy, incomplete fire-door metadata, or unresolved `FireExit` classification should be
 visible before a human reviewer spends time tracing the IFC manually.
 
-## Two-minute workflow
+## Quick workflow
 
 1. Start the app with `streamlit run app.py`.
 2. Choose **Bundled synthetic demo** and keep the default 900 mm setting. The result labels this
@@ -112,6 +112,14 @@ field is fixed.
 python -m pytest -q
 python -m ruff check .
 python -m compileall -q bim_preflight app.py scripts
+python -c "import ifcopenshell; m=ifcopenshell.open('samples/demo-egress-doors.ifc'); print(m.schema, len(m.by_type('IfcDoor')))"
+```
+
+The final smoke command prints `IFC4 6`. To rerun the explicit IfcOpenShell schema and EXPRESS-rule
+validation (`express_rules=True`) for the generated demo:
+
+```bash
+python -m pytest tests/test_demo_sample.py::test_demo_ifc_passes_schema_and_express_validation -q
 ```
 
 The suite exercises real in-memory and on-disk IFC files, the six-case sample at 900 mm, exact
@@ -196,5 +204,6 @@ or GitHub remote yet.
 | `bim_preflight/prompt_assets/` and `prompts/` | Installed and reviewable prompt contracts |
 | `scripts/generate_demo_ifc.py` | Deterministic IFC4 synthetic sample generator |
 | `samples/` | Synthetic demo and attributed official parser fixture |
+| `NOTICE.md` | Official-sample attribution, source, retrieval date, and checksums |
 | `tests/` | Unit, integration, adversarial, reproduction, and AppTest coverage |
 | `docs/demo-script.md` | 2:40 recording script |

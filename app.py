@@ -61,6 +61,20 @@ def _status_count(report: AnalysisReport, status: EngineStatus) -> int:
     return sum(result.status is status for result in report.results)
 
 
+def _ordered_results(report: AnalysisReport) -> tuple[RuleResult, ...]:
+    """Order findings for human review without changing the engine report."""
+    return tuple(
+        sorted(
+            report.results,
+            key=lambda result: (
+                result.element_name.casefold(),
+                result.rule_id,
+                result.element_global_id,
+            ),
+        )
+    )
+
+
 def _display_rows(rows: list[dict[str, object]]) -> list[dict[str, str]]:
     """Keep mixed IFC evidence values readable in Streamlit's tabular transport."""
     return [
@@ -71,8 +85,12 @@ def _display_rows(rows: list[dict[str, object]]) -> list[dict[str, str]]:
 
 def _result_display_rows(report: AnalysisReport) -> list[dict[str, str]]:
     """Add a trusted, accessible status marker without changing engine-owned rows."""
+    rows_by_result = {
+        (row["global_id"], row["rule_id"]): row for row in result_rows(report)
+    }
     rows: list[dict[str, str]] = []
-    for row in result_rows(report):
+    for result in _ordered_results(report):
+        row = rows_by_result[(result.element_global_id, result.rule_id)]
         status = EngineStatus(row["status"])
         rows.append({"status_indicator": STATUS_MARKERS[status], **row})
     return rows
@@ -204,9 +222,12 @@ def _render_report(
     st.subheader("Opening-width evidence")
     st.plotly_chart(width_plot(report, threshold_m), width="stretch")
 
-    labels = [_finding_label(result) for result in report.results]
+    ordered_results = _ordered_results(report)
+    labels = [_finding_label(result) for result in ordered_results]
     selected_label = st.selectbox("Select finding", labels, key="finding_selector")
-    selected_result = next(result for result in report.results if _finding_label(result) == selected_label)
+    selected_result = next(
+        result for result in ordered_results if _finding_label(result) == selected_label
+    )
     selected_key = (selected_result.rule_id, selected_result.element_global_id)
     previous_key = st.session_state.get("selected_finding")
     if previous_key is not None and previous_key != selected_key:
@@ -230,7 +251,7 @@ def _render_methods() -> None:
         st.markdown(
             "R1 screens only the model-declared `IfcDoor.OverallWidth` opening-width proxy against "
             "the selected project profile. R2 checks metadata presence only: `FireRating` must be a "
-            "readable label and `SelfClosing` a valid boolean; `SelfClosing=false counts as present`. "
+            "readable label and `SelfClosing` a valid boolean; SelfClosing = FALSE counts as present. "
             "No legal, fire-code, or installed-performance conclusion is made."
         )
 
@@ -247,12 +268,11 @@ def main() -> None:
         key="input_source",
         horizontal=True,
     )
-    upload = st.file_uploader(
-        "Upload IFC",
-        type=["ifc"],
-        key="ifc_upload",
-        disabled=source != "Upload IFC",
-    )
+    upload = None
+    if source == "Upload IFC":
+        upload = st.file_uploader("Upload IFC", type=["ifc"], key="ifc_upload")
+    else:
+        st.caption("Using the bundled candidate-authored synthetic IFC4 demo with six doors.")
     threshold_mm = st.number_input(
         "Minimum opening-width threshold (mm)",
         min_value=1,
