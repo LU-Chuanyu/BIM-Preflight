@@ -5,6 +5,7 @@ from math import isfinite
 from pathlib import Path
 
 import ifcopenshell
+from ifcopenshell import ifcopenshell_wrapper
 
 from bim_preflight.models import (
     DoorFact,
@@ -31,7 +32,24 @@ class _Observation:
 
 def open_ifc(path: str | Path) -> ifcopenshell.file:
     """Open an IFC file from a local path."""
-    return ifcopenshell.open(str(path))
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Path does not exist: '{path}'.")
+
+    wrapped = ifcopenshell_wrapper.open(str(path.absolute()))
+    status = wrapped.good().value()
+    if status == ifcopenshell_wrapper.file_open_status.SUCCESS:
+        return ifcopenshell.file(wrapped)
+    if status == ifcopenshell_wrapper.file_open_status.READ_ERROR:
+        raise OSError("Unable to open file for reading")
+    if status == ifcopenshell_wrapper.file_open_status.NO_HEADER:
+        raise ifcopenshell.Error("Unable to parse IFC SPF header")
+    if status == ifcopenshell_wrapper.file_open_status.UNSUPPORTED_SCHEMA:
+        identifiers = wrapped.header().file_schema_py().get_argument(0)
+        raise ifcopenshell.SchemaError(f"Unsupported schema: {','.join(identifiers)}")
+    if status == ifcopenshell_wrapper.file_open_status.INVALID_SYNTAX:
+        raise ifcopenshell.Error("Syntax error during parse, check logs")
+    raise ifcopenshell.Error("Unknown IFC parse failure")
 
 
 def _property_ref(
@@ -80,7 +98,18 @@ def _properties_from_pset(
         return ()
     observations: list[_Observation] = []
     for prop in pset.HasProperties:
-        if prop.is_a() != "IfcPropertySingleValue" or prop.Name != property_name:
+        if prop.Name != property_name:
+            continue
+        if prop.is_a() != "IfcPropertySingleValue":
+            observations.append(
+                _Observation(
+                    source=source,
+                    ref=_property_ref(door, source, prop),
+                    raw_value=prop.is_a(),
+                    valid=False,
+                    normalized_value=None,
+                )
+            )
             continue
         valid, normalized = _normalise_property_value(prop, property_name)
         observations.append(
@@ -102,11 +131,18 @@ def _occurrence_observations(
     for relation in getattr(door, "IsDefinedBy", ()):
         if relation.is_a() != "IfcRelDefinesByProperties":
             continue
-        observations.extend(
-            _properties_from_pset(
-                door, PropertySource.OCCURRENCE, relation.RelatingPropertyDefinition, property_name
-            )
+        definition = relation.RelatingPropertyDefinition
+        property_sets = (
+            definition.wrappedValue
+            if definition.is_a() == "IfcPropertySetDefinitionSet"
+            else (definition,)
         )
+        for pset in property_sets:
+            observations.extend(
+                _properties_from_pset(
+                    door, PropertySource.OCCURRENCE, pset, property_name
+                )
+            )
     return tuple(observations)
 
 

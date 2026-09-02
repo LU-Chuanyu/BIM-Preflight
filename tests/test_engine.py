@@ -1,11 +1,15 @@
+import gc
 from pathlib import Path
 
+import ifcopenshell
 import ifcopenshell.guid
+import ifcopenshell.validate
 import pytest
 from ifc_factory import make_door_model
 
 from bim_preflight import engine
 from bim_preflight.engine import IfcLoadError, analyse_ifc
+from bim_preflight.ifc_extract import open_ifc
 from bim_preflight.models import DoorFact, EngineStatus, RuleResult
 from bim_preflight.rules import RuleConfigurationError
 
@@ -73,11 +77,120 @@ def test_analyse_ifc_returns_sorted_two_rule_results_and_project_metadata(tmp_pa
     assert [result.status for result in report.results] == [EngineStatus.PASS, EngineStatus.PASS]
 
 
+def test_custom_length_unit_cannot_normalise_width_or_false_pass_r1(tmp_path: Path) -> None:
+    """Catches treating an opaque custom LENGTHUNIT as metres in the R1 decision."""
+    path = tmp_path / "custom-unit.ifc"
+    model, door = make_door_model(
+        overall_width=1.0,
+        occurrence_properties={"FireExit": True, "FireRating": "60 min", "SelfClosing": True},
+        length_prefix=None,
+    )
+    dimensions = model.create_entity(
+        "IfcDimensionalExponents",
+        LengthExponent=1,
+        MassExponent=0,
+        TimeExponent=0,
+        ElectricCurrentExponent=0,
+        ThermodynamicTemperatureExponent=0,
+        AmountOfSubstanceExponent=0,
+        LuminousIntensityExponent=0,
+    )
+    custom = model.create_entity(
+        "IfcContextDependentUnit",
+        Dimensions=dimensions,
+        UnitType="LENGTHUNIT",
+        Name="CUSTOM_LENGTH",
+    )
+    model.by_type("IfcProject")[0].UnitsInContext = model.create_entity(
+        "IfcUnitAssignment", Units=(custom,)
+    )
+    logger = ifcopenshell.validate.json_logger()
+    ifcopenshell.validate.validate(model, logger, express_rules=True)
+    assert logger.statements == []
+    model.write(str(path))
+
+    report = analyse_ifc(path, threshold_m=0.9)
+
+    fact = report.door_facts[0]
+    width_result = next(result for result in report.results if result.rule_id.startswith("R1_"))
+    assert fact.element_global_id == door.GlobalId
+    assert report.model_info.length_unit is None
+    assert fact.overall_width_raw == pytest.approx(1.0)
+    assert fact.overall_width_m is None
+    assert width_result.status is EngineStatus.NOT_EVALUABLE
+    assert width_result.finding_code == "WIDTH_NOT_EVALUABLE"
+
+
 def test_analyse_ifc_wraps_whole_file_open_failures(tmp_path: Path) -> None:
     """Catches leaking parser-specific exceptions across the application boundary."""
     missing_path = tmp_path / "does-not-exist.ifc"
     with pytest.raises(IfcLoadError, match="Unable to load IFC file"):
         analyse_ifc(missing_path, threshold_m=0.9)
+
+
+def test_open_ifc_preserves_file_not_found_error(tmp_path: Path) -> None:
+    """Catches a preflight adapter that erases the local missing-file distinction."""
+    with pytest.raises(FileNotFoundError):
+        open_ifc(tmp_path / "missing.ifc")
+
+
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+@pytest.mark.parametrize(
+    ("name", "contents", "error_type"),
+    [
+        ("garbage.ifc", "this is not IFC", ifcopenshell.Error),
+        (
+            "truncated.ifc",
+            """ISO-10303-21;
+HEADER;
+FILE_SCHEMA(('IFC4'));
+ENDSEC;
+DATA;
+#1=IFCPROJECT('0AAAAAAAAAAAAAAAAAAAAA',$,'P',$,$,$,$,$,$);
+""",
+            ifcopenshell.Error,
+        ),
+        (
+            "unsupported.ifc",
+            """ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');
+FILE_NAME('unsupported.ifc','2026-09-03T00:00:00',(''),(''),'test','test','');
+FILE_SCHEMA(('IFC999'));
+ENDSEC;
+DATA;
+ENDSEC;
+END-ISO-10303-21;
+""",
+            ifcopenshell.SchemaError,
+        ),
+    ],
+)
+def test_open_ifc_rejects_bad_step_without_unraisable_destructor_warning(
+    tmp_path: Path, name: str, contents: str, error_type: type[Exception]
+) -> None:
+    """Catches constructing a high-level file around a failed low-level parse."""
+    path = tmp_path / name
+    path.write_text(contents)
+
+    with pytest.raises(error_type):
+        open_ifc(path)
+    gc.collect()
+
+
+def test_open_ifc_wraps_valid_synthetic_and_official_models(tmp_path: Path) -> None:
+    """Catches bypassing the warning while breaking either accepted local-file path."""
+    synthetic_path = tmp_path / "synthetic.ifc"
+    _write_model(synthetic_path, fire_exit=True, name="Synthetic")
+    official_path = Path(__file__).parents[1] / "samples" / "official" / "Building-Architecture.ifc"
+
+    synthetic = open_ifc(synthetic_path)
+    official = open_ifc(official_path)
+
+    assert synthetic.schema == "IFC4"
+    assert len(synthetic.by_type("IfcDoor")) == 1
+    assert official.schema == "IFC4"
+    assert len(official.by_type("IfcProject")) == 1
 
 
 @pytest.mark.parametrize("failing_step", ["resolve_length_unit", "extract_door_facts"])

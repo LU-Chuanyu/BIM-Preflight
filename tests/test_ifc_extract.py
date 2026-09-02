@@ -1,8 +1,22 @@
+from pathlib import Path
+
+import ifcopenshell
+import ifcopenshell.validate
 import pytest
 from ifc_factory import make_door_model
 
-from bim_preflight.ifc_extract import extract_door_facts, resolve_property
+from bim_preflight.ifc_extract import extract_door_facts, open_ifc, resolve_property
 from bim_preflight.models import PropertySource, ValueState
+
+
+def _enumerated_property(
+    model: ifcopenshell.file, name: str
+) -> ifcopenshell.entity_instance:
+    return model.create_entity(
+        "IfcPropertyEnumeratedValue",
+        Name=name,
+        EnumerationValues=(model.create_entity("IfcLabel", "TRUE"),),
+    )
 
 
 def test_occurrence_fire_exit_overrides_type_and_keeps_both_sources() -> None:
@@ -40,6 +54,75 @@ def test_invalid_occurrence_boolean_blocks_type_fallback() -> None:
     assert fact.fire_exit.value is None
     assert fact.fire_exit.source is PropertySource.OCCURRENCE
     assert len(fact.fire_exit.evidence_refs) == 2
+
+
+def test_occurrence_wrong_property_representation_is_invalid_and_blocks_type() -> None:
+    """Catches a same-name enumerated occurrence value being skipped before type fallback."""
+    model, door = make_door_model(type_properties={"FireExit": True})
+    enumerated = _enumerated_property(model, "FireExit")
+    occurrence_pset = model.create_entity(
+        "IfcPropertySet",
+        GlobalId=ifcopenshell.guid.new(),
+        Name="Pset_DoorCommon",
+        HasProperties=(enumerated,),
+    )
+    model.create_entity(
+        "IfcRelDefinesByProperties",
+        GlobalId=ifcopenshell.guid.new(),
+        RelatedObjects=(door,),
+        RelatingPropertyDefinition=occurrence_pset,
+    )
+
+    fact = extract_door_facts(model)[0]
+
+    assert fact.fire_exit.state is ValueState.INVALID
+    assert fact.fire_exit.value is None
+    assert fact.fire_exit.source is PropertySource.OCCURRENCE
+    assert len(fact.fire_exit.evidence_refs) == 2
+    invalid_evidence = next(
+        item
+        for item in fact.evidence
+        if item.label == "Pset_DoorCommon.FireExit" and item.source == "occurrence"
+    )
+    assert invalid_evidence.raw_value == "IfcPropertyEnumeratedValue"
+    assert invalid_evidence.normalized_value is None
+    assert invalid_evidence.ref in fact.fire_exit.evidence_refs
+
+
+def test_type_wrong_property_representation_is_invalid_with_type_evidence() -> None:
+    """Catches a same-name enumerated type value disappearing as though it were absent."""
+    model, door = make_door_model()
+    enumerated = _enumerated_property(model, "FireExit")
+    type_pset = model.create_entity(
+        "IfcPropertySet",
+        GlobalId=ifcopenshell.guid.new(),
+        Name="Pset_DoorCommon",
+        HasProperties=(enumerated,),
+    )
+    door_type = model.create_entity(
+        "IfcDoorType", GlobalId=ifcopenshell.guid.new(), Name="Enumerated Door Type"
+    )
+    door_type.HasPropertySets = (type_pset,)
+    model.create_entity(
+        "IfcRelDefinesByType",
+        GlobalId=ifcopenshell.guid.new(),
+        RelatedObjects=(door,),
+        RelatingType=door_type,
+    )
+
+    fact = extract_door_facts(model)[0]
+
+    assert fact.fire_exit.state is ValueState.INVALID
+    assert fact.fire_exit.value is None
+    assert fact.fire_exit.source is PropertySource.TYPE
+    invalid_evidence = next(
+        item
+        for item in fact.evidence
+        if item.label == "Pset_DoorCommon.FireExit" and item.source == "type"
+    )
+    assert invalid_evidence.raw_value == "IfcPropertyEnumeratedValue"
+    assert invalid_evidence.normalized_value is None
+    assert invalid_evidence.ref in fact.fire_exit.evidence_refs
 
 
 @pytest.mark.parametrize("invalid_value", ["TRUE", 1])
@@ -99,3 +182,78 @@ def test_missing_or_non_positive_width_has_no_normalised_value() -> None:
     fact = extract_door_facts(model)[0]
     assert fact.overall_width_raw == pytest.approx(0.0)
     assert fact.overall_width_m is None
+
+
+@pytest.mark.parametrize("schema", ["IFC4", "IFC4X3"])
+def test_property_definition_set_wrapper_preserves_occurrence_fire_exit(
+    tmp_path: Path, schema: str
+) -> None:
+    """Catches a valid aggregate SELECT wrapper being mistaken for a single property set."""
+    model = ifcopenshell.file(schema=schema)
+    metre = model.create_entity("IfcSIUnit", UnitType="LENGTHUNIT", Name="METRE")
+    units = model.create_entity("IfcUnitAssignment", Units=(metre,))
+    model.create_entity(
+        "IfcProject",
+        GlobalId=ifcopenshell.guid.new(),
+        Name="Aggregate property project",
+        UnitsInContext=units,
+    )
+    door = model.create_entity(
+        "IfcDoor",
+        GlobalId=ifcopenshell.guid.new(),
+        Name="Aggregate property door",
+        OverallWidth=1.0,
+    )
+    fire_exit = model.create_entity(
+        "IfcPropertySingleValue",
+        Name="FireExit",
+        NominalValue=model.create_entity("IfcBoolean", True),
+    )
+    door_common = model.create_entity(
+        "IfcPropertySet",
+        GlobalId=ifcopenshell.guid.new(),
+        Name="Pset_DoorCommon",
+        HasProperties=(fire_exit,),
+    )
+    note = model.create_entity(
+        "IfcPropertySingleValue",
+        Name="Note",
+        NominalValue=model.create_entity("IfcLabel", "aggregate wrapper fixture"),
+    )
+    other_pset = model.create_entity(
+        "IfcPropertySet",
+        GlobalId=ifcopenshell.guid.new(),
+        Name="Pset_Test",
+        HasProperties=(note,),
+    )
+    model.create_entity(
+        "IfcRelDefinesByProperties",
+        GlobalId=ifcopenshell.guid.new(),
+        RelatedObjects=(door,),
+        RelatingPropertyDefinition=door_common,
+    )
+    path = tmp_path / f"aggregate-{schema}.ifc"
+    model.write(str(path))
+    single_pset_argument = f",#{door_common.id()});"
+    aggregate_argument = (
+        f",IFCPROPERTYSETDEFINITIONSET((#{door_common.id()},#{other_pset.id()})));"
+    )
+    step = path.read_text()
+    assert step.count(single_pset_argument) == 1
+    path.write_text(step.replace(single_pset_argument, aggregate_argument))
+
+    reopened = open_ifc(path)
+    relation = reopened.by_type("IfcRelDefinesByProperties")[0]
+    definition = relation.RelatingPropertyDefinition
+    assert definition.is_a() == "IfcPropertySetDefinitionSet"
+    assert isinstance(definition.wrappedValue, tuple)
+    logger = ifcopenshell.validate.json_logger()
+    ifcopenshell.validate.validate(reopened, logger, express_rules=True)
+    assert logger.statements == []
+
+    fact = extract_door_facts(reopened)[0]
+
+    assert fact.fire_exit.state is ValueState.PRESENT
+    assert fact.fire_exit.value is True
+    assert fact.fire_exit.source is PropertySource.OCCURRENCE
+    assert len(fact.fire_exit.evidence_refs) == 1
