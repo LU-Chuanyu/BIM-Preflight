@@ -272,7 +272,7 @@ def main() -> None:
     if source == "Upload IFC":
         upload = st.file_uploader("Upload IFC", type=["ifc"], key="ifc_upload")
     else:
-        st.caption("Using the bundled candidate-authored synthetic IFC4 demo with six doors.")
+        st.caption("Using the bundled project-generated synthetic IFC4 demo with six doors.")
     threshold_mm = st.number_input(
         "Minimum opening-width threshold (mm)",
         min_value=1,

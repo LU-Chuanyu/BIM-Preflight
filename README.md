@@ -130,9 +130,9 @@ deliberately malformed-IFC test; it is third-party cleanup behavior, not a clean
 
 ## Samples and provenance
 
-### Candidate-authored synthetic sample
+### Project-generated synthetic sample
 
-`samples/demo-egress-doors.ifc` is candidate-authored synthetic test data, not a real project or
+`samples/demo-egress-doors.ifc` is project-generated synthetic test data, not a real project or
 legal evidence. Its six doors deliberately cover:
 
 | Door | Width | `FireExit` source/value | Metadata case |
@@ -144,7 +144,7 @@ legal evidence. Its six doors deliberately cover:
 | `05 Missing FireExit` | 1000 mm | missing | applicability unresolved |
 | `06 Type-Inherited Properties` | 1000 mm | type / `TRUE` | `FireRating` and `SelfClosing` also inherited |
 
-SHA-256: `898fd827e87cfc4c4dd5159328206f8a739f699915c0d82ad2faba301d9477cc`.
+SHA-256: `ed46c5f98f5c959f4c004cf8209b7fb12d6fce035086419069313357efe5440f`.
 
 ### Official parser smoke sample
 
@@ -167,6 +167,10 @@ projection of one frozen `RuleResult` and may return only `summary`, `evidence_r
 controlled-language selections to the supplied result, and requires every evidence reference to
 come from that result. Rejected, unavailable, or malformed output is discarded and leaves the
 finding unchanged.
+
+AI assisted this prototype's implementation and review. Verification is provided by deterministic
+tests and checked-in evidence; the optional model explanation remains experimental and has not
+been live-model validated.
 
 | Prompt asset | Runtime role |
 |---|---|

@@ -1,4 +1,4 @@
-"""Generate the deterministic, candidate-authored BIM Preflight demo IFC."""
+"""Generate the deterministic, project-generated BIM Preflight demo IFC."""
 
 from __future__ import annotations
 
@@ -63,11 +63,15 @@ def _set_fixed_header(model: ifcopenshell.file) -> None:
     model.header.file_description.implementation_level = "2;1"
     model.header.file_name.name = "demo-egress-doors.ifc"
     model.header.file_name.time_stamp = _FIXED_TIMESTAMP
-    model.header.file_name.author = ("BIM Preflight candidate",)
-    model.header.file_name.organization = ("Candidate-authored synthetic test data",)
+    model.header.file_name.author = ("BIM Preflight project generator",)
+    model.header.file_name.organization = (
+        "BIM Preflight project-generated synthetic test data",
+    )
     model.header.file_name.preprocessor_version = "IfcOpenShell 0.8.5"
     model.header.file_name.originating_system = "BIM Preflight deterministic demo generator"
-    model.header.file_name.authorization = "Candidate-authored synthetic test data"
+    model.header.file_name.authorization = (
+        "BIM Preflight project-generated synthetic test data"
+    )
 
 
 def generate_demo_ifc(output_path: str | Path = DEFAULT_OUTPUT) -> Path:
@@ -94,7 +98,7 @@ def generate_demo_ifc(output_path: str | Path = DEFAULT_OUTPUT) -> Path:
         "IfcProject",
         GlobalId=_guid("spatial:project"),
         Name="BIM Preflight Synthetic Demo",
-        Description="Candidate-authored synthetic test data; not a real project model.",
+        Description="Project-generated synthetic test data; not a real project model.",
         RepresentationContexts=(context,),
         UnitsInContext=units,
     )
@@ -103,7 +107,7 @@ def generate_demo_ifc(output_path: str | Path = DEFAULT_OUTPUT) -> Path:
         "IfcSite",
         GlobalId=_guid("spatial:site"),
         Name="Synthetic Site",
-        Description="Candidate-authored synthetic test data.",
+        Description="Project-generated synthetic test data.",
         ObjectPlacement=site_placement,
         CompositionType="ELEMENT",
     )
@@ -177,7 +181,7 @@ def generate_demo_ifc(output_path: str | Path = DEFAULT_OUTPUT) -> Path:
             "IfcDoor",
             GlobalId=_guid(f"door:{semantic_key}"),
             Name=name,
-            Description="Candidate-authored synthetic test case.",
+            Description="Project-generated synthetic test case.",
             ObjectPlacement=_placement(model, storey_placement),
             OverallHeight=2100.0,
             OverallWidth=width,

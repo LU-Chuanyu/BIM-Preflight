@@ -1,2 +1,1 @@
 """BIM Preflight domain package."""
-

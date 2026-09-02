@@ -1,6 +1,6 @@
 # BIM Preflight Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checklist syntax for tracking.
 
 **Goal:** Build a reproducible Streamlit application that parses IFC doors, runs two deterministic egress-door preflight rules, visualises auditable evidence, and optionally explains an immutable result through a schema-validated LLM boundary.
 
@@ -9,6 +9,25 @@
 **Tech Stack:** Python 3.12–3.13, IfcOpenShell 0.8.5, Streamlit 1.62.0, Plotly 7.0.0, jsonschema 4.26.0, OpenAI Python 3.7.0, pytest 9.0.2, Ruff 0.16.5.
 
 **Spec:** `docs/superpowers/specs/2026-09-02-bim-preflight-design.md`
+
+## Historical plan status
+
+> **Status on 2026-09-03:** This checklist records the completed local implementation sequence.
+> It is not evidence of hosting, a recorded demo, a GitHub remote, live-model validation, or email
+> submission. Current reproducibility and verification commands are documented in `README.md`.
+
+## Implemented deviations and review hardening
+
+- The optional explanation boundary uses stricter finite controlled-language selections and
+  installed package resources, with tests that keep the packaged and reviewable prompt copies in
+  sync. This supersedes the plan's narrower phrase/number blacklist.
+- The demo uses compressed UUIDv5 GlobalIds derived from stable semantic keys, making regeneration
+  byte-exact instead of generating identifiers once and merely committing the result.
+- Engine output retains canonical GlobalId/rule ordering. Human-readable door-name sorting is
+  applied only by the UI and never mutates the analysis report.
+- Review hardening added adversarial explanation checks, per-rule error isolation, source-aware UI
+  state invalidation, typed load errors, provenance-focused views, and release-truth checks without
+  expanding the two-rule scope.
 
 ## Global Constraints
 
@@ -41,11 +60,11 @@
 - Consumes: no project interfaces.
 - Produces: `EngineStatus`, `ValueState`, `PropertySource`, `Evidence`, `ResolvedValue`, `DoorFact`, `RuleResult`, `ModelInfo`, `AnalysisReport`, and `to_primitive(value)`.
 
-- [ ] **Step 1: Add dependency and tooling metadata**
+- [x] **Step 1: Add dependency and tooling metadata**
 
 Create `pyproject.toml` with Python range `>=3.12,<3.14`, runtime dependencies pinned to the versions in the header, a `dev` extra containing pytest and Ruff, pytest path configuration, and Ruff line length `100`. Create `.gitignore` covering `.venv/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`, `.streamlit/secrets.toml`, `.env`, and macOS metadata.
 
-- [ ] **Step 2: Write the failing model tests**
+- [x] **Step 2: Write the failing model tests**
 
 Create tests that construct literal domain objects and assert enum values, frozen-instance behaviour, tuple-based evidence ordering, and JSON-safe conversion:
 
@@ -78,17 +97,17 @@ def test_to_primitive_preserves_engine_values() -> None:
 
 The production mutation caught is accidental mutability or enum leakage into JSON.
 
-- [ ] **Step 3: Verify the model tests fail for the expected reason**
+- [x] **Step 3: Verify the model tests fail for the expected reason**
 
 Run: `python -m pytest tests/test_models.py -q`
 
 Expected: collection fails because `bim_preflight.models` does not yet exist.
 
-- [ ] **Step 4: Implement the smallest frozen model layer**
+- [x] **Step 4: Implement the smallest frozen model layer**
 
 Use `@dataclass(frozen=True, slots=True)` and tuple fields. `raw_value` and `normalized_value` accept JSON scalars only. `RuleResult.inputs_used` is `tuple[tuple[str, Scalar], ...]`, not a mutable dictionary. `to_primitive` recursively converts dataclasses, tuples, and enums without changing values.
 
-- [ ] **Step 5: Run Task 1 verification**
+- [x] **Step 5: Run Task 1 verification**
 
 Run:
 
@@ -99,7 +118,7 @@ python -m ruff check bim_preflight/models.py tests/test_models.py
 
 Expected: all model tests pass and Ruff reports no errors.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```bash
 git add .gitignore pyproject.toml bim_preflight tests/test_models.py
@@ -121,7 +140,7 @@ git commit -m "feat: add immutable preflight domain model"
 - Consumes: model classes from Task 1.
 - Produces: `UnitResolution`, `resolve_length_unit(model)`, `resolve_property(door, property_name)`, `extract_door_facts(model)`, and `open_ifc(path)`.
 
-- [ ] **Step 1: Write failing length-unit tests**
+- [x] **Step 1: Write failing length-unit tests**
 
 Use real in-memory IfcOpenShell files produced by `tests/ifc_factory.py`. Assert that `MILLI + METRE` yields `scale_to_m == 0.001`, `METRE` yields `1.0`, and a file without a usable project `LENGTHUNIT` returns an unavailable `UnitResolution` rather than assuming a unit.
 
@@ -154,23 +173,23 @@ def test_millimetres_resolve_to_si_scale() -> None:
 
 The production mutation caught is treating every IFC length as metres.
 
-- [ ] **Step 2: Run unit tests and verify red**
+- [x] **Step 2: Run unit tests and verify red**
 
 Run: `python -m pytest tests/test_units.py -q`
 
 Expected: import failure for `bim_preflight.units`.
 
-- [ ] **Step 3: Implement explicit project-unit resolution**
+- [x] **Step 3: Implement explicit project-unit resolution**
 
 Inspect `IfcProject.UnitsInContext.Units`, require one length unit, call `ifcopenshell.util.unit.calculate_unit_scale(model, "LENGTHUNIT")`, and return a frozen `UnitResolution(available, label, scale_to_m, evidence_ref, error_code)`. Do not accept a library default when no project length unit was found.
 
-- [ ] **Step 4: Verify unit tests green**
+- [x] **Step 4: Verify unit tests green**
 
 Run: `python -m pytest tests/test_units.py -q`
 
 Expected: all unit tests pass.
 
-- [ ] **Step 5: Write failing property-resolution and extraction tests**
+- [x] **Step 5: Write failing property-resolution and extraction tests**
 
 Generate literal IFC4 doors and Psets in memory. Cover occurrence value, inherited type value, valid occurrence override, invalid occurrence blocking fallback, missing `FireExit`, malicious door names, `OverallWidth` conversion, and retained evidence paths.
 
@@ -195,17 +214,17 @@ def test_malicious_name_remains_display_data() -> None:
 
 The production mutations caught are silent type precedence, boolean coercion from strings, and executing model-authored text as control data.
 
-- [ ] **Step 6: Run extraction tests and verify red**
+- [x] **Step 6: Run extraction tests and verify red**
 
 Run: `python -m pytest tests/test_ifc_extract.py -q`
 
 Expected: import failure or missing `extract_door_facts`.
 
-- [ ] **Step 7: Implement property and door extraction**
+- [x] **Step 7: Implement property and door extraction**
 
 Read occurrence and type Psets separately. Accept only IFC boolean values for `FireExit` and `SelfClosing`, and a non-empty string for `FireRating`. Use property-level occurrence override and type fallback. Preserve evidence for every observed source. Read `OverallWidth` as a positive numeric attribute and multiply by the resolved project scale; a missing or non-positive value has no normalised width.
 
-- [ ] **Step 8: Run Task 2 verification**
+- [x] **Step 8: Run Task 2 verification**
 
 Run:
 
@@ -216,7 +235,7 @@ python -m ruff check bim_preflight/units.py bim_preflight/ifc_extract.py tests/i
 
 Expected: all unit and extraction tests pass and Ruff reports no errors.
 
-- [ ] **Step 9: Commit Task 2**
+- [x] **Step 9: Commit Task 2**
 
 ```bash
 git add bim_preflight/units.py bim_preflight/ifc_extract.py tests/ifc_factory.py tests/test_units.py tests/test_ifc_extract.py
@@ -237,7 +256,7 @@ git commit -m "feat: extract IFC door facts with provenance"
 - Consumes: `DoorFact`, `RuleResult`, `ModelInfo`, `AnalysisReport`, `open_ifc`, and `extract_door_facts`.
 - Produces: `evaluate_width_rule(door, threshold_m)`, `evaluate_metadata_rule(door)`, `evaluate_door(door, threshold_m)`, and `analyse_ifc(path, threshold_m)`.
 
-- [ ] **Step 1: Write failing pure-rule tests**
+- [x] **Step 1: Write failing pure-rule tests**
 
 Construct `DoorFact` literals without IfcOpenShell. Cover the five shared statuses and the exact semantics in the global constraints:
 
@@ -268,37 +287,37 @@ def test_false_self_closing_is_complete_metadata() -> None:
 
 Also assert exact `finding_code` and evidence references for explicit false, missing classification, missing width, blank rating, and missing self-closing.
 
-- [ ] **Step 2: Run rule tests and verify red**
+- [x] **Step 2: Run rule tests and verify red**
 
 Run: `python -m pytest tests/test_rules.py -q`
 
 Expected: import failure for `bim_preflight.rules`.
 
-- [ ] **Step 3: Implement the two pure rules**
+- [x] **Step 3: Implement the two pure rules**
 
 Implement one early applicability function shared by both rules. Use deterministic messages and immutable tuples. Add threshold evidence directly from the configuration. Catch no broad exceptions inside the pure functions.
 
-- [ ] **Step 4: Verify pure rules green**
+- [x] **Step 4: Verify pure rules green**
 
 Run: `python -m pytest tests/test_rules.py -q`
 
 Expected: all pure-rule tests pass.
 
-- [ ] **Step 5: Write failing engine integration tests**
+- [x] **Step 5: Write failing engine integration tests**
 
 Use a temporary IFC generated by `tests/ifc_factory.py`, call `analyse_ifc`, and assert model schema, unit label, door count, two results per door, stable result ordering by door GlobalId then rule identifier, and per-door error isolation.
 
-- [ ] **Step 6: Run engine tests and verify red**
+- [x] **Step 6: Run engine tests and verify red**
 
 Run: `python -m pytest tests/test_engine.py -q`
 
 Expected: import failure for `bim_preflight.engine`.
 
-- [ ] **Step 7: Implement orchestration**
+- [x] **Step 7: Implement orchestration**
 
 `analyse_ifc` opens one path, resolves model metadata once, extracts doors once, evaluates both rules for every door, and returns a frozen `AnalysisReport`. Invalid whole files raise a typed `IfcLoadError`; unexpected per-door evaluation exceptions become `ERROR` results without stopping other doors.
 
-- [ ] **Step 8: Run Task 3 verification**
+- [x] **Step 8: Run Task 3 verification**
 
 Run:
 
@@ -309,7 +328,7 @@ python -m ruff check bim_preflight/rules.py bim_preflight/engine.py tests/test_r
 
 Expected: all rule and engine tests pass and Ruff reports no errors.
 
-- [ ] **Step 9: Commit Task 3**
+- [x] **Step 9: Commit Task 3**
 
 ```bash
 git add bim_preflight/rules.py bim_preflight/engine.py tests/test_rules.py tests/test_engine.py
@@ -333,7 +352,7 @@ git commit -m "feat: add deterministic egress-door checks"
 - Consumes: `RuleResult` and `to_primitive`.
 - Produces: `ExplanationDraft`, `ExplanationUnavailable`, `build_explanation_input(result, mode)`, `validate_explanation(payload, result)`, and `request_explanation(result, mode, client, model_name)`.
 
-- [ ] **Step 1: Write failing explanation-boundary tests**
+- [x] **Step 1: Write failing explanation-boundary tests**
 
 Use literal dictionaries and one fake external client. Assert accepted output, forbidden extra keys, invented evidence references, unsupported numbers, compliance language, malformed JSON, absent API client, prompt file loading, and preservation of the original frozen result.
 
@@ -381,25 +400,25 @@ def test_rejects_invented_evidence_reference() -> None:
 
 The production mutations caught are treating structured output as semantic authority and merging model output into the engine result.
 
-- [ ] **Step 2: Run explanation tests and verify red**
+- [x] **Step 2: Run explanation tests and verify red**
 
 Run: `python -m pytest tests/test_explain.py -q`
 
 Expected: import failure for `bim_preflight.explain`.
 
-- [ ] **Step 3: Add the checked-in runtime prompt contract**
+- [x] **Step 3: Add the checked-in runtime prompt contract**
 
 Write the approved constrained system prompt. The user template contains only `MODE` and an `ENGINE_OWNED_RULE_RESULT` block. The JSON Schema requires exactly `summary`, `evidence_refs`, `missing_information`, and `next_action`; all strings and lists have explicit length bounds and `additionalProperties` is `false`. `prompts/README.md` maps each file to its runtime call site and test. The prompt log records only prompts actually used for this project and their verified effect.
 
-- [ ] **Step 4: Implement local validation before external calls**
+- [x] **Step 4: Implement local validation before external calls**
 
 Load prompt and schema files relative to the repository root. Validate with `Draft202012Validator`. Require evidence references to be a subset of the result, reject decimal tokens absent from the serialised result, and reject the phrases `legally compliant`, `code compliant`, `meets code`, `approved`, and `certified` case-insensitively. Raise `ExplanationUnavailable` with a safe reason; do not return partial content.
 
-- [ ] **Step 5: Implement the optional Responses adapter**
+- [x] **Step 5: Implement the optional Responses adapter**
 
 Use the injected client or `OpenAI()` when explicitly called. Send the checked-in system prompt as `instructions`, the rendered user template as `input`, and the checked-in schema as strict structured text format. Parse `response.output_text`, validate it locally, and return only `ExplanationDraft`. No API call occurs during import or without an explicit button action.
 
-- [ ] **Step 6: Run Task 4 verification**
+- [x] **Step 6: Run Task 4 verification**
 
 Run:
 
@@ -410,7 +429,7 @@ python -m ruff check bim_preflight/explain.py tests/test_explain.py
 
 Expected: all explanation tests pass and Ruff reports no errors.
 
-- [ ] **Step 7: Commit Task 4**
+- [x] **Step 7: Commit Task 4**
 
 ```bash
 git add prompts bim_preflight/explain.py tests/test_explain.py
@@ -431,41 +450,41 @@ git commit -m "feat: constrain AI finding explanations"
 - Consumes: `AnalysisReport`, `RuleResult`, `analyse_ifc`, and `request_explanation`.
 - Produces: `result_rows(report)`, `width_plot(report, threshold_m)`, `evidence_rows(report, result)`, and the Streamlit entry point.
 
-- [ ] **Step 1: Write failing presentation tests**
+- [x] **Step 1: Write failing presentation tests**
 
 Create an `AnalysisReport` literal and assert that table rows retain status, finding code, GlobalId, and rule; the width figure contains the configured 0.9 m threshold line; non-evaluable widths are omitted from plotted measurements but remain in result rows; and evidence rows contain source and unit provenance.
 
-- [ ] **Step 2: Run presentation tests and verify red**
+- [x] **Step 2: Run presentation tests and verify red**
 
 Run: `python -m pytest tests/test_presentation.py -q`
 
 Expected: import failure for `bim_preflight.presentation`.
 
-- [ ] **Step 3: Implement pure presentation helpers**
+- [x] **Step 3: Implement pure presentation helpers**
 
 Build Plotly `graph_objects` figures without a pandas dependency. Apply one documented colour mapping to all views: pass green, fail red, not evaluable amber, not applicable grey, error purple. Include axis title `Model-declared opening width (m)` and a labelled project threshold line.
 
-- [ ] **Step 4: Verify presentation tests green**
+- [x] **Step 4: Verify presentation tests green**
 
 Run: `python -m pytest tests/test_presentation.py -q`
 
 Expected: all presentation tests pass.
 
-- [ ] **Step 5: Write the failing Streamlit empty-state smoke test**
+- [x] **Step 5: Write the failing Streamlit empty-state smoke test**
 
 Use `streamlit.testing.v1.AppTest.from_file("app.py")`, run the app without secrets, and assert the title, uploader, threshold control, deterministic screening notice, and absence of uncaught exceptions.
 
-- [ ] **Step 6: Run the app smoke test and verify red**
+- [x] **Step 6: Run the app smoke test and verify red**
 
 Run: `python -m pytest tests/test_app_smoke.py -q`
 
 Expected: failure because `app.py` does not exist.
 
-- [ ] **Step 7: Implement the web interface**
+- [x] **Step 7: Implement the web interface**
 
 Render the exact sections from the spec. Accept either an uploaded `.ifc` file or the bundled demo model. Save uploads to a named temporary file, remove it in `finally`, and display typed load errors without a traceback. All badges and deterministic messages read from `RuleResult`. The AI button is disabled with a clear message when `OPENAI_API_KEY` is absent.
 
-- [ ] **Step 8: Run Task 5 verification**
+- [x] **Step 8: Run Task 5 verification**
 
 Run:
 
@@ -476,7 +495,7 @@ python -m ruff check app.py bim_preflight/presentation.py tests/test_presentatio
 
 Expected: all presentation and app smoke tests pass and Ruff reports no errors.
 
-- [ ] **Step 9: Commit Task 5**
+- [x] **Step 9: Commit Task 5**
 
 ```bash
 git add app.py bim_preflight/presentation.py tests/test_presentation.py tests/test_app_smoke.py
@@ -501,17 +520,17 @@ git commit -m "feat: add Streamlit evidence dashboard"
 - Consumes: all production interfaces from Tasks 1–5.
 - Produces: a deterministic six-door IFC demo file, an attributed unmodified buildingSMART smoke model, exact setup commands, and a 2 minute 40 second video script.
 
-- [ ] **Step 1: Write the failing demo-sample integration test**
+- [x] **Step 1: Write the failing demo-sample integration test**
 
 The test opens `samples/demo-egress-doors.ifc`, analyses it at 0.9 m, and asserts the named demo cases produce at least one R1 `PASS`, one R1 `FAIL`, one R2 `FAIL`, one `NOT_APPLICABLE`, one `NOT_EVALUABLE`, and one type-inherited `FireExit` evidence reference.
 
-- [ ] **Step 2: Run the demo-sample test and verify red**
+- [x] **Step 2: Run the demo-sample test and verify red**
 
 Run: `python -m pytest tests/test_demo_sample.py -q`
 
 Expected: failure because the demo IFC is absent.
 
-- [ ] **Step 3: Implement and run the deterministic IFC generator**
+- [x] **Step 3: Implement and run the deterministic IFC generator**
 
 Create an IFC4 project with millimetre units and six named doors. Assign occurrence and type `Pset_DoorCommon` values so the file covers pass, fail, incomplete metadata, explicit non-applicability, missing classification, and type inheritance. Use deterministic semantic case names, while allowing valid IFC GlobalIds to be generated once and committed. Run:
 
@@ -522,19 +541,19 @@ python -m pytest tests/test_demo_sample.py -q
 
 Expected: the file is written and the end-to-end assertions pass.
 
-- [ ] **Step 4: Add the official buildingSMART sample and attribution**
+- [x] **Step 4: Add the official buildingSMART sample and attribution**
 
 Download the unmodified file from:
 
 `https://raw.githubusercontent.com/buildingSMART/Certification-datasets/main/IFC%204.0.2.1%20%28IFC%204%29/PCERT-Sample-Scene/Building-Architecture.ifc`
 
-Save the repository's CC BY 4.0 license text and write `NOTICE.md` naming buildingSMART International Ltd., the source URL, CC BY 4.0, and that the official file is unmodified. State separately that `demo-egress-doors.ifc` is candidate-authored synthetic test data.
+Save the repository's CC BY 4.0 license text and write `NOTICE.md` naming buildingSMART International Ltd., the source URL, CC BY 4.0, and that the official file is unmodified. State separately that `demo-egress-doors.ifc` is project-generated synthetic test data.
 
-- [ ] **Step 5: Write the README and timed demo script**
+- [x] **Step 5: Write the README and timed demo script**
 
 README sections are: problem, live workflow, architecture, exact rule table, status table, property precedence, setup, run, tests, sample provenance, AI boundary, limitations, and repository map. Screenshots are excluded until real application captures exist. The demo script allocates 15 seconds to scope, 80 seconds to real engine evidence, 30 seconds to uncertain cases, 25 seconds to the AI boundary, and 10 seconds to tests and closing.
 
-- [ ] **Step 6: Run full local release verification**
+- [x] **Step 6: Run full local release verification**
 
 Run:
 
@@ -547,11 +566,11 @@ python -c "import ifcopenshell; m=ifcopenshell.open('samples/demo-egress-doors.i
 
 Expected: all tests pass, Ruff reports no errors, compilation exits zero, and the IFC smoke command prints `IFC4 6`.
 
-- [ ] **Step 7: Perform a clean-environment installation check**
+- [x] **Step 7: Perform a clean-environment installation check**
 
 Create a temporary virtual environment outside the repository, install `.[dev]`, run the full test suite from the repository, and start Streamlit headlessly long enough to receive a successful health response from `/_stcore/health`. Stop the local process after the response.
 
-- [ ] **Step 8: Commit Task 6**
+- [x] **Step 8: Commit Task 6**
 
 ```bash
 git add scripts samples NOTICE.md README.md docs/demo-script.md tests/test_demo_sample.py

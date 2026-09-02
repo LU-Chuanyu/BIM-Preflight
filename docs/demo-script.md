@@ -29,7 +29,8 @@ presence, so a valid false SelfClosing value is present; it does not prove fire 
 ## 1:35–2:05 — Uncertainty and applicability (30 seconds)
 
 **Visible actions:** Select `03 Metadata Incomplete` R2, then `04 Explicit Non-Egress`, then
-`05 Missing FireExit`, and finish on `06 Type-Inherited Properties` evidence.
+`05 Missing FireExit`, and finish by selecting the R2 result for
+`06 Type-Inherited Properties` and its evidence.
 
 **Spoken lines:** “Missing FireRating is an explicit completeness failure. FireExit false makes
 both rules not applicable. Missing FireExit is not evaluable; names never substitute for that
@@ -37,22 +38,23 @@ property. This final door inherits FireExit, FireRating, and SelfClosing from it
 evidence panel labels that source as type. The interface preserves uncertainty instead of turning
 it into a pass.”
 
-## 2:05–2:30 — Bounded AI (25 seconds)
+## 2:05–2:30 — Optional experimental explanation (25 seconds)
 
-**Visible action:** Keep the selected deterministic result visible and point to the disabled AI
-actions when no `OPENAI_API_KEY` is configured. Briefly show `prompts/runtime/output.schema.json`
-and `bim_preflight/explain.py` side by side if the recording layout allows it.
+**Visible action:** Keep the selected deterministic result visible and point to the optional AI
+explanation actions, which are disabled when no `OPENAI_API_KEY` is configured. Briefly show
+`prompts/runtime/output.schema.json` and `bim_preflight/explain.py` side by side if the recording
+layout allows it.
 
-**Spoken lines:** “The core workflow needs no API key. In this no-key run, AI actions are visibly
-disabled. When configured, the model can select only four explanation fields from a checked-in
-schema. Local validation constrains the text and evidence references, and any rejected output is
-discarded. The immutable engine result remains the only verdict.”
+**Spoken lines:** “The primary product is the deterministic web tool and needs no API key. The
+optional AI explanation is experimental and has not been live-model validated here. When
+configured, it can select only four explanation fields from a checked-in schema. Local validation
+constrains text and evidence references, discards rejected output, and leaves the immutable engine
+result as the only verdict.”
 
 ## 2:30–2:40 — Reproduction and close (10 seconds)
 
 **Visible action:** Show a terminal with the completed test summary and, on the next line, the
 `IFC4 6` sample smoke result. Do not scroll through test logs.
 
-**Spoken line:** “The suite covers the rules, real IFC parsing, exact sample regeneration, prompt
-boundary, and Streamlit workflow. The demo is reproducible locally; no legal, code, or
-installed-performance conclusion is made.”
+**Spoken line:** “Tests cover the rules, IFC parsing, exact sample regeneration, prompt boundary,
+and web workflow. This is local project screening, not a legal or performance verdict.”

@@ -18,6 +18,13 @@ DEMO_PATH = ROOT / "samples" / "demo-egress-doors.ifc"
 OFFICIAL_PATH = ROOT / "samples" / "official" / "Building-Architecture.ifc"
 OFFICIAL_LICENSE_PATH = ROOT / "samples" / "official" / "LICENSE-CC-BY-4.0.txt"
 APP_PATH = ROOT / "app.py"
+README_PATH = ROOT / "README.md"
+NOTICE_PATH = ROOT / "NOTICE.md"
+DEMO_SCRIPT_PATH = ROOT / "docs" / "demo-script.md"
+IMPLEMENTATION_PLAN_PATH = (
+    ROOT / "docs" / "superpowers" / "plans" / "2026-09-02-bim-preflight-implementation.md"
+)
+DEMO_SHA256 = "ed46c5f98f5c959f4c004cf8209b7fb12d6fce035086419069313357efe5440f"
 OFFICIAL_SHA256 = "3ff9b10bd00c7b96dded51e7ca5a6b69efbea38b049adcdd05fcd247de7e70d5"
 OFFICIAL_LICENSE_SHA256 = "3e20c50b6edfdb4be207f64495586115d0574c8394538109d74f79e1d8976d18"
 
@@ -98,9 +105,58 @@ def test_generator_reproduces_committed_ifc_bytes_and_fixed_header(tmp_path: Pat
     model = ifcopenshell.open(str(regenerated))
     assert model.header.file_name.name == "demo-egress-doors.ifc"
     assert model.header.file_name.time_stamp == "2026-09-03T00:00:00"
+    assert model.header.file_name.author == ("BIM Preflight project generator",)
+    assert model.header.file_name.organization == (
+        "BIM Preflight project-generated synthetic test data",
+    )
+    assert model.header.file_name.authorization == (
+        "BIM Preflight project-generated synthetic test data"
+    )
+    assert model.by_type("IfcProject")[0].Description == (
+        "Project-generated synthetic test data; not a real project model."
+    )
+    assert model.by_type("IfcSite")[0].Description == (
+        "Project-generated synthetic test data."
+    )
+    assert {door.Description for door in model.by_type("IfcDoor")} == {
+        "Project-generated synthetic test case."
+    }
+    assert b"candidate-authored" not in regenerated.read_bytes().lower()
     roots = model.by_type("IfcRoot")
     assert len({root.GlobalId for root in roots}) == len(roots)
     assert all(len(root.GlobalId) == 22 for root in roots)
+
+
+def test_release_truth_language_hash_and_docs_remain_synchronised() -> None:
+    """Catches authorship overclaims, stale hashes, or a demo script that shows wrong evidence."""
+    release_paths = (
+        ROOT / "scripts" / "generate_demo_ifc.py",
+        DEMO_PATH,
+        APP_PATH,
+        README_PATH,
+        NOTICE_PATH,
+        DEMO_SCRIPT_PATH,
+        IMPLEMENTATION_PLAN_PATH,
+    )
+    assert all(b"candidate-authored" not in path.read_bytes().lower() for path in release_paths)
+    assert sha256(DEMO_PATH.read_bytes()).hexdigest() == DEMO_SHA256
+
+    readme = README_PATH.read_text()
+    normalised_readme = " ".join(readme.split())
+    assert "AI assisted this prototype's implementation and review." in normalised_readme
+    assert "deterministic tests and checked-in evidence" in normalised_readme
+    assert DEMO_SHA256 in readme
+    assert DEMO_SHA256 in NOTICE_PATH.read_text()
+
+    demo_script = " ".join(DEMO_SCRIPT_PATH.read_text().split())
+    assert "selecting the R2 result for `06 Type-Inherited Properties`" in demo_script
+    assert "The primary product is the deterministic web tool" in demo_script
+    assert "optional AI explanation is experimental" in demo_script
+
+    implementation_plan = IMPLEMENTATION_PLAN_PATH.read_text()
+    assert "- [ ] **Step" not in implementation_plan
+    assert "## Historical plan status" in implementation_plan
+    assert "## Implemented deviations and review hardening" in implementation_plan
 
 
 def test_demo_ifc_passes_schema_and_express_validation() -> None:
@@ -138,7 +194,10 @@ def test_demo_source_hides_upload_widget_and_identifies_bundled_data(monkeypatch
 
     assert app.exception == []
     assert app.file_uploader == []
-    assert any("bundled" in caption.value.lower() for caption in app.caption)
+    assert any(
+        caption.value == "Using the bundled project-generated synthetic IFC4 demo with six doors."
+        for caption in app.caption
+    )
     assert any(
         info.value == "Select Run preflight to analyse the bundled synthetic demo."
         for info in app.info
