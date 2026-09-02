@@ -10,7 +10,7 @@ from bim_preflight.models import (
     ResolvedValue,
     ValueState,
 )
-from bim_preflight.rules import evaluate_metadata_rule, evaluate_width_rule
+from bim_preflight.rules import RuleConfigurationError, evaluate_metadata_rule, evaluate_width_rule
 
 
 def _resolved_value(
@@ -86,7 +86,7 @@ def test_width_screening_uses_positive_normalised_width_and_inclusive_boundary(
     assert "statutory" not in result.message.lower()
 
 
-def test_explicitly_non_egress_door_is_not_applicable_to_both_rules() -> None:
+def test_explicitly_non_egress_door_uses_only_decisive_applicability_data() -> None:
     """Catches treating explicit FireExit false as a metadata or width failure."""
     door = make_door_fact(fire_exit=False)
     width = evaluate_width_rule(door, 0.9)
@@ -97,9 +97,13 @@ def test_explicitly_non_egress_door_is_not_applicable_to_both_rules() -> None:
     assert metadata.finding_code == "FIRE_EXIT_FALSE"
     assert width.evidence_refs == (
         "door.d1.occurrence.Pset_DoorCommon.FireExit",
-        "rule.R1_EGRESS_DOOR_OPENING_WIDTH.configuration.threshold_m",
     )
     assert metadata.evidence_refs == ("door.d1.occurrence.Pset_DoorCommon.FireExit",)
+    assert width.inputs_used == metadata.inputs_used == (
+        ("fire_exit_value", False),
+        ("fire_exit_state", "PRESENT"),
+        ("fire_exit_source", "OCCURRENCE"),
+    )
 
 
 def test_unresolved_egress_classification_is_not_evaluable_for_both_rules() -> None:
@@ -111,8 +115,25 @@ def test_unresolved_egress_classification_is_not_evaluable_for_both_rules() -> N
     assert metadata.status is EngineStatus.NOT_EVALUABLE
     assert width.finding_code == "FIRE_EXIT_UNRESOLVED"
     assert metadata.finding_code == "FIRE_EXIT_UNRESOLVED"
-    assert width.evidence_refs == ("rule.R1_EGRESS_DOOR_OPENING_WIDTH.configuration.threshold_m",)
+    assert width.evidence_refs == ()
     assert metadata.evidence_refs == ()
+    assert width.inputs_used == metadata.inputs_used == (
+        ("fire_exit_value", None),
+        ("fire_exit_state", "MISSING"),
+        ("fire_exit_source", "NONE"),
+    )
+
+
+@pytest.mark.parametrize(
+    "invalid_threshold",
+    [math.nan, math.inf, -math.inf, 0.0, -0.1, True, "0.9"],
+)
+def test_invalid_threshold_is_rejected_before_fire_exit_short_circuit(
+    invalid_threshold: object,
+) -> None:
+    """Catches bad configuration being converted into a door verdict or error result."""
+    with pytest.raises(RuleConfigurationError, match="threshold"):
+        evaluate_width_rule(make_door_fact(fire_exit=False), invalid_threshold)
 
 
 def test_missing_width_is_not_evaluable_with_width_and_threshold_evidence() -> None:
@@ -177,3 +198,47 @@ def test_missing_self_closing_fails_metadata_completeness() -> None:
         "door.d1.occurrence.Pset_DoorCommon.FireExit",
         "door.d1.occurrence.Pset_DoorCommon.FireRating",
     )
+
+
+@pytest.mark.parametrize(
+    ("fire_rating_state", "self_closing_state", "expected_code", "expected_message"),
+    [
+        (
+            ValueState.MISSING,
+            ValueState.MISSING,
+            "METADATA_INCOMPLETE_FIRE_RATING_MISSING_SELF_CLOSING_MISSING",
+            "Required metadata is incomplete: FireRating is missing; SelfClosing is missing.",
+        ),
+        (
+            ValueState.MISSING,
+            ValueState.INVALID,
+            "METADATA_INCOMPLETE_FIRE_RATING_MISSING_SELF_CLOSING_INVALID",
+            "Required metadata is incomplete: FireRating is missing; SelfClosing is invalid.",
+        ),
+        (
+            ValueState.INVALID,
+            ValueState.MISSING,
+            "METADATA_INCOMPLETE_FIRE_RATING_INVALID_SELF_CLOSING_MISSING",
+            "Required metadata is incomplete: FireRating is invalid; SelfClosing is missing.",
+        ),
+    ],
+)
+def test_metadata_aggregates_all_missing_or_invalid_fields_in_canonical_order(
+    fire_rating_state: ValueState,
+    self_closing_state: ValueState,
+    expected_code: str,
+    expected_message: str,
+) -> None:
+    """Catches reporting only the first incomplete metadata field encountered."""
+    result = evaluate_metadata_rule(
+        make_door_fact(
+            fire_exit=True,
+            fire_rating=None,
+            self_closing=None,
+            fire_rating_state=fire_rating_state,
+            self_closing_state=self_closing_state,
+        )
+    )
+    assert result.status is EngineStatus.FAIL
+    assert result.finding_code == expected_code
+    assert result.message == expected_message

@@ -11,6 +11,17 @@ METADATA_RULE_ID = "R2_EGRESS_DOOR_METADATA_COMPLETENESS"
 _THRESHOLD_REF = f"rule.{WIDTH_RULE_ID}.configuration.threshold_m"
 
 
+class RuleConfigurationError(ValueError):
+    """Raised when a deterministic rule configuration is unusable."""
+
+
+def validate_threshold_m(threshold_m: object) -> float:
+    """Require a finite, strictly positive metric screening threshold."""
+    if type(threshold_m) not in {int, float} or not isfinite(threshold_m) or threshold_m <= 0:
+        raise RuleConfigurationError("threshold_m must be a finite, strictly positive number")
+    return float(threshold_m)
+
+
 def _unique_refs(*reference_groups: Iterable[str]) -> tuple[str, ...]:
     """Join evidence references while preserving their first-seen order."""
     return tuple(dict.fromkeys(ref for group in reference_groups for ref in group))
@@ -65,8 +76,18 @@ def _applicability(
     )
 
 
+def _applicability_inputs(door: DoorFact) -> tuple[tuple[str, None | bool | int | float | str], ...]:
+    fire_exit = door.fire_exit
+    return (
+        ("fire_exit_value", fire_exit.value),
+        ("fire_exit_state", fire_exit.state.value),
+        ("fire_exit_source", fire_exit.source.value),
+    )
+
+
 def evaluate_width_rule(door: DoorFact, threshold_m: float) -> RuleResult:
     """Screen a classified egress door's model-declared opening-width proxy."""
+    threshold_m = validate_threshold_m(threshold_m)
     applicability_status, code, message, fire_exit_refs = _applicability(door)
     inputs = (("overall_width_m", door.overall_width_m), ("threshold_m", threshold_m))
     if applicability_status is not None:
@@ -76,8 +97,8 @@ def evaluate_width_rule(door: DoorFact, threshold_m: float) -> RuleResult:
             status=applicability_status,
             finding_code=code or "FIRE_EXIT_UNRESOLVED",
             message=message or "The door's FireExit classification is missing or invalid.",
-            evidence_refs=_unique_refs(fire_exit_refs, (_THRESHOLD_REF,)),
-            inputs_used=inputs,
+            evidence_refs=fire_exit_refs,
+            inputs_used=_applicability_inputs(door),
         )
 
     width_refs = _width_evidence_refs(door)
@@ -139,49 +160,41 @@ def evaluate_metadata_rule(door: DoorFact) -> RuleResult:
             finding_code=code or "FIRE_EXIT_UNRESOLVED",
             message=message or "The door's FireExit classification is missing or invalid.",
             evidence_refs=fire_exit_refs,
-            inputs_used=inputs,
+            inputs_used=_applicability_inputs(door),
         )
 
+    defects: list[tuple[str, str, str]] = []
     fire_rating = door.fire_rating
     if fire_rating.state is ValueState.MISSING:
-        return _rule_result(
-            rule_id=METADATA_RULE_ID,
-            door=door,
-            status=EngineStatus.FAIL,
-            finding_code="FIRE_RATING_MISSING",
-            message="Required FireRating metadata is missing.",
-            evidence_refs=metadata_refs,
-            inputs_used=inputs,
-        )
-    if fire_rating.state is not ValueState.PRESENT or not isinstance(fire_rating.value, str) or not fire_rating.value.strip():
-        return _rule_result(
-            rule_id=METADATA_RULE_ID,
-            door=door,
-            status=EngineStatus.FAIL,
-            finding_code="FIRE_RATING_INVALID",
-            message="Required FireRating metadata is blank or invalid.",
-            evidence_refs=metadata_refs,
-            inputs_used=inputs,
-        )
-
+        defects.append(("FIRE_RATING", "FireRating", "MISSING"))
+    elif (
+        fire_rating.state is not ValueState.PRESENT
+        or not isinstance(fire_rating.value, str)
+        or not fire_rating.value.strip()
+    ):
+        defects.append(("FIRE_RATING", "FireRating", "INVALID"))
     self_closing = door.self_closing
     if self_closing.state is ValueState.MISSING:
+        defects.append(("SELF_CLOSING", "SelfClosing", "MISSING"))
+    elif self_closing.state is not ValueState.PRESENT or type(self_closing.value) is not bool:
+        defects.append(("SELF_CLOSING", "SelfClosing", "INVALID"))
+
+    if defects:
+        code = "_".join(f"{field}_{state}" for field, _, state in defects)
+        if len(defects) == 1:
+            _field, label, state = defects[0]
+            message = f"Required {label} metadata is {'missing' if state == 'MISSING' else 'invalid'}."
+        else:
+            code = f"METADATA_INCOMPLETE_{code}"
+            message = "Required metadata is incomplete: " + "; ".join(
+                f"{label} is {state.lower()}" for _, label, state in defects
+            ) + "."
         return _rule_result(
             rule_id=METADATA_RULE_ID,
             door=door,
             status=EngineStatus.FAIL,
-            finding_code="SELF_CLOSING_MISSING",
-            message="Required SelfClosing metadata is missing.",
-            evidence_refs=metadata_refs,
-            inputs_used=inputs,
-        )
-    if self_closing.state is not ValueState.PRESENT or type(self_closing.value) is not bool:
-        return _rule_result(
-            rule_id=METADATA_RULE_ID,
-            door=door,
-            status=EngineStatus.FAIL,
-            finding_code="SELF_CLOSING_INVALID",
-            message="Required SelfClosing metadata is invalid.",
+            finding_code=code,
+            message=message,
             evidence_refs=metadata_refs,
             inputs_used=inputs,
         )
