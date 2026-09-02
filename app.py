@@ -335,6 +335,8 @@ def main() -> None:
         and isinstance(analysed_source_kind, str)
     ):
         _render_report(report, threshold_m, analysed_source_kind, analysed_source)
+    elif source == "Bundled synthetic demo":
+        st.info("Select Run preflight to analyse the bundled synthetic demo.")
     else:
         st.info("Upload an IFC file and select Run preflight to start.")
     _render_methods()

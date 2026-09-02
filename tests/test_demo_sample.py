@@ -139,6 +139,11 @@ def test_demo_source_hides_upload_widget_and_identifies_bundled_data(monkeypatch
     assert app.exception == []
     assert app.file_uploader == []
     assert any("bundled" in caption.value.lower() for caption in app.caption)
+    assert any(
+        info.value == "Select Run preflight to analyse the bundled synthetic demo."
+        for info in app.info
+    )
+    assert all("Upload an IFC file" not in info.value for info in app.info)
 
 
 def test_bundled_demo_runs_in_streamlit_without_ai_credentials(monkeypatch) -> None:
