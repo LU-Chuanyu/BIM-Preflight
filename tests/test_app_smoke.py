@@ -42,6 +42,15 @@ def _zero_door_ifc_bytes(tmp_path: Path) -> bytes:
     return path.read_bytes()
 
 
+def _missing_metadata_ifc_bytes(tmp_path: Path) -> bytes:
+    path = tmp_path / "missing-metadata.ifc"
+    model, _door = make_door_model(
+        occurrence_properties={"FireExit": True, "SelfClosing": False},
+    )
+    model.write(str(path))
+    return path.read_bytes()
+
+
 def _upload_and_run(app: AppTest, data: bytes, *, name: str = "doors.ifc") -> AppTest:
     app.file_uploader(key="ifc_upload").set_value((name, data, "application/x-step"))
     app.run()
@@ -240,6 +249,29 @@ def test_missing_key_disables_actions_without_constructing_an_explanation_reques
     assert all(button.disabled for button in app.button if button.key.startswith("ai_"))
 
 
+def test_missing_evidence_action_is_relevance_gated_with_an_api_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches presenting the missing-evidence action for a finding with no deficiency."""
+    complete = _upload_and_run(_app(monkeypatch, with_api_key=True), _ifc_bytes(tmp_path))
+
+    assert complete.button(key="ai_EXPLAIN_RESULT").disabled is False
+    assert complete.button(key="ai_EXPLAIN_MISSING_EVIDENCE").disabled is True
+    assert complete.button(key="ai_RECOMMEND_NEXT_MANUAL_CHECK").disabled is False
+
+    incomplete = _upload_and_run(
+        _app(monkeypatch, with_api_key=True),
+        _missing_metadata_ifc_bytes(tmp_path),
+    )
+    selector = incomplete.selectbox(key="finding_selector")
+    selector.set_value(next(value for value in selector.options if "R2_" in value))
+    incomplete.run()
+
+    assert incomplete.button(key="ai_EXPLAIN_RESULT").disabled is False
+    assert incomplete.button(key="ai_EXPLAIN_MISSING_EVIDENCE").disabled is False
+    assert incomplete.button(key="ai_RECOMMEND_NEXT_MANUAL_CHECK").disabled is False
+
+
 def test_finding_selection_uses_the_requested_rule_and_global_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Catches a selector that identifies a finding only by a duplicated display name."""
     app = _upload_and_run(_app(monkeypatch), _ifc_bytes(tmp_path))
@@ -297,6 +329,45 @@ def test_explanation_draft_is_not_rendered_after_selecting_another_finding(
     app.run()
     displayed = " ".join(node.value for node in [*app.markdown, *app.caption, *app.text])
     assert "R1 draft" not in displayed
+
+
+def test_explanation_draft_is_not_rendered_when_its_mode_is_inapplicable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a stored missing-evidence draft surviving after its mode becomes irrelevant."""
+    app = _upload_and_run(_app(monkeypatch, with_api_key=True), _ifc_bytes(tmp_path))
+    selected_label = app.selectbox(key="finding_selector").value
+    rule_id, global_id_field, _name = selected_label.split(" | ", 2)
+    global_id = global_id_field.removeprefix("GlobalId=")
+    app.session_state["explanation_state"] = (
+        (rule_id, global_id, "EXPLAIN_MISSING_EVIDENCE"),
+        ExplanationDraft("Stale mode draft", (), (), "Review the source."),
+    )
+
+    app.run()
+
+    displayed = " ".join(node.value for node in [*app.markdown, *app.caption, *app.text])
+    assert "Stale mode draft" not in displayed
+
+
+def test_explanation_heading_names_the_bound_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches different AI actions rendering under an indistinguishable generic heading."""
+    app = _upload_and_run(_app(monkeypatch, with_api_key=True), _ifc_bytes(tmp_path))
+    selected_label = app.selectbox(key="finding_selector").value
+    rule_id, global_id_field, _name = selected_label.split(" | ", 2)
+    global_id = global_id_field.removeprefix("GlobalId=")
+    app.session_state["explanation_state"] = (
+        (rule_id, global_id, "RECOMMEND_NEXT_MANUAL_CHECK"),
+        ExplanationDraft("Manual-check draft", (), (), "Review the source."),
+    )
+
+    app.run()
+
+    assert any(
+        "AI manual-check recommendation" in node.value for node in app.markdown
+    )
 
 
 def test_upload_temporary_file_is_unlinked_when_analysis_fails(tmp_path: Path) -> None:

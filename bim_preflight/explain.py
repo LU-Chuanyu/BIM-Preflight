@@ -38,6 +38,9 @@ _SUMMARY_WIDTH_UNUSABLE = "The finding concerns unusable model-declared opening-
 _SUMMARY_WIDTH_ERROR = "The finding concerns an interrupted opening-width screening check."
 _SUMMARY_METADATA = "The finding concerns FireRating and SelfClosing metadata."
 _SUMMARY_METADATA_ERROR = "The finding concerns an interrupted metadata completeness check."
+_SUMMARY_MANUAL_CHECK = (
+    "The response identifies the next manual source-model check for this finding."
+)
 
 _ACTION_FIRE_EXIT = "Verify the FireExit property and source in the authoring model."
 _ACTION_WIDTH = "Review the model-declared opening-width source in the authoring model."
@@ -235,8 +238,27 @@ def _controlled_profile(result: RuleResult) -> tuple[str, str, frozenset[str]]:
     raise _unavailable("controlled language profile unavailable")
 
 
-def validate_explanation(payload: object, result: RuleResult) -> ExplanationDraft:
-    """Validate local schema, exact evidence, and the result-specific language profile."""
+def is_explanation_mode_applicable(result: RuleResult, mode: object) -> bool:
+    """Return whether a closed explanation mode applies to this frozen result."""
+    try:
+        validated_mode = _validate_mode(mode)
+        _summary, _next_action, supported_missing = _controlled_profile(result)
+    except ExplanationUnavailable:
+        return False
+    return validated_mode != "EXPLAIN_MISSING_EVIDENCE" or bool(supported_missing)
+
+
+def validate_explanation(
+    payload: object,
+    result: RuleResult,
+    mode: str,
+) -> ExplanationDraft:
+    """Validate one mode, local schema, exact evidence, and controlled language."""
+    mode = _validate_mode(mode)
+    summary, next_action, allowed_missing = _controlled_profile(result)
+    if mode == "EXPLAIN_MISSING_EVIDENCE" and not allowed_missing:
+        raise _unavailable("mode not applicable")
+
     schema = _load_schema()
     try:
         Draft202012Validator(schema).validate(payload)
@@ -255,14 +277,26 @@ def validate_explanation(payload: object, result: RuleResult) -> ExplanationDraf
     if any(reference not in allowed_references for reference in references):
         raise _unavailable("evidence validation failed")
 
-    summary, next_action, allowed_missing = _controlled_profile(result)
     narratives = (payload["summary"], *payload["missing_information"], payload["next_action"])
     if not all(value.isascii() for value in narratives):
         raise _unavailable("controlled language validation failed")
-    if payload["summary"] != summary or payload["next_action"] != next_action:
+    expected_summary = (
+        _SUMMARY_MANUAL_CHECK if mode == "RECOMMEND_NEXT_MANUAL_CHECK" else summary
+    )
+    if payload["summary"] != expected_summary:
+        if payload["summary"] in {summary, _SUMMARY_MANUAL_CHECK}:
+            raise _unavailable("mode validation failed")
         raise _unavailable("controlled language validation failed")
-    if not set(payload["missing_information"]).issubset(allowed_missing):
+    if payload["next_action"] != next_action:
         raise _unavailable("controlled language validation failed")
+    received_missing = frozenset(payload["missing_information"])
+    if not received_missing.issubset(allowed_missing):
+        raise _unavailable("controlled language validation failed")
+    if mode == "EXPLAIN_MISSING_EVIDENCE":
+        if received_missing != allowed_missing:
+            raise _unavailable("mode validation failed")
+    elif received_missing:
+        raise _unavailable("mode validation failed")
 
     return ExplanationDraft(
         summary=payload["summary"],
@@ -296,6 +330,8 @@ def request_explanation(
 ) -> ExplanationDraft:
     """Explicitly request one explanation and fail closed on every boundary error."""
     mode = _validate_mode(mode)
+    if not is_explanation_mode_applicable(result, mode):
+        raise _unavailable("mode not applicable")
     instructions = _read_resource(_SYSTEM_PROMPT_NAME)
     rendered_input = build_explanation_input(result, mode)
     schema = _outbound_schema(_load_schema())
@@ -350,4 +386,4 @@ def request_explanation(
         payload = json.loads(output_text)
     except (json.JSONDecodeError, RecursionError):
         raise _unavailable("response malformed") from None
-    return validate_explanation(payload, result)
+    return validate_explanation(payload, result, mode)

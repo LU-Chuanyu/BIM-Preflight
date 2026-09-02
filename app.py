@@ -10,7 +10,12 @@ from tempfile import NamedTemporaryFile
 import streamlit as st
 
 from bim_preflight.engine import IfcLoadError, analyse_ifc
-from bim_preflight.explain import ExplanationDraft, ExplanationUnavailable, request_explanation
+from bim_preflight.explain import (
+    ExplanationDraft,
+    ExplanationUnavailable,
+    is_explanation_mode_applicable,
+    request_explanation,
+)
 from bim_preflight.models import AnalysisReport, EngineStatus, RuleResult
 from bim_preflight.presentation import (
     STATUS_MARKERS,
@@ -27,6 +32,11 @@ SCREENING_NOTICE = (
 DEMO_PATH = Path(__file__).parent / "samples" / "demo-egress-doors.ifc"
 DEMO_PROFILE = "Demo project screening profile"
 _AI_UNAVAILABLE = "AI actions are unavailable because OPENAI_API_KEY is not configured."
+_AI_MODE_HEADINGS = {
+    "EXPLAIN_RESULT": "AI result explanation",
+    "EXPLAIN_MISSING_EVIDENCE": "AI missing-evidence explanation",
+    "RECOMMEND_NEXT_MANUAL_CHECK": "AI manual-check recommendation",
+}
 
 
 @contextmanager
@@ -145,8 +155,8 @@ def _store_analysis(
     st.session_state.pop("finding_selector", None)
 
 
-def _show_explanation(draft: ExplanationDraft) -> None:
-    st.markdown("#### AI explanation (separate from deterministic finding)")
+def _show_explanation(draft: ExplanationDraft, mode: str) -> None:
+    st.markdown(f"#### {_AI_MODE_HEADINGS[mode]} (separate from deterministic finding)")
     st.write(draft.summary)
     if draft.evidence_refs:
         st.caption("Referenced evidence: " + ", ".join(draft.evidence_refs))
@@ -168,7 +178,12 @@ def _render_ai_panel(result: RuleResult) -> None:
     columns = st.columns(3)
     for column, (label, mode) in zip(columns, actions):
         with column:
-            if st.button(label, key=f"ai_{mode}", disabled=not has_api_key):
+            mode_applies = is_explanation_mode_applicable(result, mode)
+            if st.button(
+                label,
+                key=f"ai_{mode}",
+                disabled=not has_api_key or not mode_applies,
+            ):
                 try:
                     st.session_state.explanation_state = (
                         (result.rule_id, result.element_global_id, mode),
@@ -184,10 +199,11 @@ def _render_ai_panel(result: RuleResult) -> None:
         and isinstance(explanation_state[0], tuple)
         and len(explanation_state[0]) == 3
         and explanation_state[0][:2] == (result.rule_id, result.element_global_id)
+        and is_explanation_mode_applicable(result, explanation_state[0][2])
         and isinstance(explanation_state[1], ExplanationDraft)
     ):
         draft = explanation_state[1]
-        _show_explanation(draft)
+        _show_explanation(draft, explanation_state[0][2])
 
 
 def _render_report(

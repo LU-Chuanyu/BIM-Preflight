@@ -22,3 +22,14 @@
   UTF-8 size limits, recursive input, and installed-resource behavior.
 - Live model validation: not performed. No live model run is recorded. Fake-client tests and the
   package smoke test are not live model validation.
+
+## Runtime explanation contract v3
+
+- Bound local semantic validation to the requested closed mode. Missing-evidence output must
+  contain the complete supported deficiency set exactly once; result and manual-check modes must
+  return an empty `missing_information` list. The manual-check mode uses a distinct fixed summary,
+  preventing result and recommendation actions from accepting identical output.
+- Relevance-gated the missing-evidence action to findings with controlled missing, invalid, or
+  diagnostic information. Fake-client and Streamlit AppTest regressions cover cross-mode rejection,
+  pre-client failure, button state, and stale-output suppression.
+- Live model validation: not performed. No live model run is recorded.

@@ -125,8 +125,7 @@ python -m pytest tests/test_demo_sample.py::test_demo_ifc_passes_schema_and_expr
 The suite exercises real in-memory and on-disk IFC files, the six-case sample at 900 mm, exact
 byte regeneration, rule and extraction boundaries, adversarial AI-output validation, and the
 credential-free Streamlit workflow. The committed synthetic file also passes IfcOpenShell 0.8.5
-schema and EXPRESS-rule validation. A known IfcOpenShell destructor warning can appear after the
-deliberately malformed-IFC test; it is third-party cleanup behavior, not a clean-suite claim.
+schema and EXPRESS-rule validation.
 
 ## Samples and provenance
 
@@ -165,8 +164,10 @@ measurements, conversions, threshold, deficiencies, and provenance. The model re
 projection of one frozen `RuleResult` and may return only `summary`, `evidence_refs`,
 `missing_information`, and `next_action`. Local validation enforces the exact schema, narrows
 controlled-language selections to the supplied result, and requires every evidence reference to
-come from that result. Rejected, unavailable, or malformed output is discarded and leaves the
-finding unchanged.
+come from that result. Explanation modes are enforced locally, and the missing-evidence action is
+available only when the controlled result profile contains missing, invalid, or diagnostic
+information; the manual-check mode uses distinct fixed summary framing. Rejected, unavailable, or
+malformed output is discarded and leaves the finding unchanged.
 
 AI assisted this prototype's implementation and review. Verification is provided by deterministic
 tests and checked-in evidence; the optional model explanation remains experimental and has not

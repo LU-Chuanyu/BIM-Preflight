@@ -19,7 +19,8 @@
         "The finding concerns unusable model-declared opening-width information.",
         "The finding concerns an interrupted opening-width screening check.",
         "The finding concerns FireRating and SelfClosing metadata.",
-        "The finding concerns an interrupted metadata completeness check."
+        "The finding concerns an interrupted metadata completeness check.",
+        "The response identifies the next manual source-model check for this finding."
       ]
     },
     "evidence_refs": {
