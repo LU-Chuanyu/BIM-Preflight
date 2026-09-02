@@ -27,8 +27,9 @@ def _unavailable(error_code: str) -> UnitResolution:
 
 
 def _unit_label(unit: ifcopenshell.entity_instance) -> str:
-    prefix = unit.Prefix or ""
-    return f"{prefix}{unit.Name}"
+    if unit.is_a("IfcSIUnit"):
+        return f"{unit.Prefix or ''}{unit.Name}"
+    return str(unit.Name)
 
 
 def resolve_length_unit(model: ifcopenshell.file) -> UnitResolution:
