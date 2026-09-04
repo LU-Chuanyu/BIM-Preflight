@@ -1,6 +1,5 @@
 """End-to-end checks for the reproducible IFC release samples."""
 
-import json
 from hashlib import sha256
 from pathlib import Path
 
@@ -24,7 +23,7 @@ DEMO_SCRIPT_PATH = ROOT / "docs" / "demo-script.md"
 IMPLEMENTATION_PLAN_PATH = (
     ROOT / "docs" / "superpowers" / "plans" / "2026-09-02-bim-preflight-implementation.md"
 )
-DEMO_SHA256 = "ed46c5f98f5c959f4c004cf8209b7fb12d6fce035086419069313357efe5440f"
+DEMO_SHA256 = "b2cacb9e6c97b21a814c56fd787533155faaef084d9e424141302375e6d3bf27"
 OFFICIAL_SHA256 = "3ff9b10bd00c7b96dded51e7ca5a6b69efbea38b049adcdd05fcd247de7e70d5"
 OFFICIAL_LICENSE_SHA256 = "3e20c50b6edfdb4be207f64495586115d0574c8394538109d74f79e1d8976d18"
 
@@ -94,6 +93,17 @@ def test_demo_ifc_has_exact_six_case_rule_matrix_and_type_provenance() -> None:
         )
         for reference in resolved.evidence_refs
     )
+
+    model = ifcopenshell.open(str(DEMO_PATH))
+    door06 = next(
+        door for door in model.by_type("IfcDoor") if door.Name == "06 Type-Inherited Properties"
+    )
+    assert door06.PredefinedType is None
+    assert door06.OperationType is None
+    assert len(door06.IsTypedBy) == 1
+    inherited_type = door06.IsTypedBy[0].RelatingType
+    assert inherited_type.PredefinedType == "DOOR"
+    assert inherited_type.OperationType == "SINGLE_SWING_LEFT"
 
 
 def test_generator_reproduces_committed_ifc_bytes_and_fixed_header(tmp_path: Path) -> None:
@@ -206,7 +216,7 @@ def test_demo_source_hides_upload_widget_and_identifies_bundled_data(monkeypatch
 
 
 def test_bundled_demo_runs_in_streamlit_without_ai_credentials(monkeypatch) -> None:
-    """Catches a packaged sample that cannot complete the visible two-rule workflow."""
+    """Catches a packaged demo that loses its compact review-first dashboard."""
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     app = AppTest.from_file(APP_PATH, default_timeout=15).run()
     app.radio(key="input_source").set_value("Bundled synthetic demo")
@@ -214,20 +224,36 @@ def test_bundled_demo_runs_in_streamlit_without_ai_credentials(monkeypatch) -> N
     app.run()
 
     assert app.exception == []
-    summary = next(json.loads(node.value) for node in app.json if "door_count" in node.value)
-    assert summary["schema"] == "IFC4"
-    assert summary["project_length_unit"] == "MILLIMETRE"
-    assert summary["door_count"] == 6
+    assert app.json == []
     metrics = {metric.label: metric.value for metric in app.metric}
-    assert metrics == {
+    assert {metrics[label] for label in ("IFC schema", "Project unit", "Doors")} == {
+        "IFC4",
+        "MILLIMETRE",
+        "6",
+    }
+    assert "Source" not in metrics
+    assert "Screening threshold" not in metrics
+    assert any(caption.value == "Source: Bundled synthetic demo" for caption in app.caption)
+    assert any(
+        caption.value == "Screening threshold: Demo project screening profile: 900 mm"
+        for caption in app.caption
+    )
+    assert {label: metrics[label] for label in ("PASS", "FAIL", "NOT_EVALUABLE", "NOT_APPLICABLE", "ERROR")} == {
         "PASS": "6",
         "FAIL": "2",
         "NOT_EVALUABLE": "2",
         "NOT_APPLICABLE": "2",
         "ERROR": "0",
     }
+    assert any(
+        "2 failed checks require resolution; 2 need additional information." in markdown.value
+        for markdown in app.markdown
+    )
     result_table = app.dataframe[0].value
-    assert result_table.iloc[0]["element_name"] == "01 Width Pass"
+    assert len(result_table) == 12
+    assert result_table.iloc[0]["check"] == "Opening width"
+    assert result_table.iloc[0]["status"] == "FAIL"
+    assert result_table.iloc[0]["element_name"] == "02 Width Fail"
     assert result_table.iloc[0]["rule_id"] == WIDTH_RULE_ID
-    assert app.selectbox(key="finding_selector").value.endswith("01 Width Pass")
+    assert app.selectbox(key="finding_selector").value.endswith("02 Width Fail")
     assert app.selectbox(key="finding_selector").value.startswith(WIDTH_RULE_ID)

@@ -202,7 +202,7 @@ The first version does not include a 3D model viewer. Stable GlobalId and full p
 
 The repository includes:
 
-- a generated, standards-conformant IFC fixture with pass, fail, incomplete, inherited, explicitly non-applicable, and unclassified doors; and
+- a generated, schema- and EXPRESS-valid IFC fixture with pass, fail, incomplete, inherited, explicitly non-applicable, and unclassified doors; and
 - one unmodified buildingSMART certification sample for parser smoke testing, with CC BY 4.0 attribution and the original source URL.
 
 The generated file is labelled synthetic test data and is produced by a checked-in script. It is never described as a real project model.

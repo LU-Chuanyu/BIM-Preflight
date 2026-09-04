@@ -82,7 +82,7 @@ def _normalise_property_value(
             return True, raw
         return False, None
     if property_name == "FireRating":
-        if isinstance(raw, str) and raw.strip():
+        if nominal.is_a("IfcLabel") and isinstance(raw, str) and raw.strip():
             return True, raw
         return False, None
     raise ValueError(f"Unsupported property: {property_name}")
@@ -164,7 +164,7 @@ def _type_observations(
     for door_type in _door_types(door):
         if not door_type.is_a("IfcDoorType") and not door_type.is_a("IfcDoorStyle"):
             continue
-        for pset in getattr(door_type, "HasPropertySets", ()):
+        for pset in (getattr(door_type, "HasPropertySets", None) or ()):
             observations.extend(
                 _properties_from_pset(door, PropertySource.TYPE, pset, property_name)
             )

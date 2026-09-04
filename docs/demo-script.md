@@ -13,7 +13,7 @@ OverallWidth is a model-declared opening-width proxy, not certified clear width.
 
 ## 0:15–1:35 — Deterministic engine evidence (80 seconds)
 
-**Visible actions:** Select **Bundled synthetic demo**, click **Run preflight**, and point to the
+**Visible actions:** Keep **Bundled synthetic demo** selected, click **Run preflight**, and point to the
 IFC4 schema, `MILLIMETRE` project unit, six-door count, five status counters, and 12-row result
 table. Select `01 Width Pass` R1 and show raw 1000 mm, normalised 1.0 m, the threshold input, stable
 GlobalId, and `WIDTH_MEETS_THRESHOLD`. Then select `02 Width Fail` R1 and show raw 800 mm,

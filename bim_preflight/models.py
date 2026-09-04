@@ -76,6 +76,7 @@ class ModelInfo:
     schema: str
     length_unit: str | None
     door_count: int
+    length_unit_issue: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

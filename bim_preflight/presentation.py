@@ -5,7 +5,7 @@ from math import isfinite
 import plotly.graph_objects as go
 
 from bim_preflight.models import AnalysisReport, EngineStatus, RuleResult
-from bim_preflight.rules import WIDTH_RULE_ID
+from bim_preflight.rules import METADATA_RULE_ID, WIDTH_RULE_ID
 
 STATUS_COLORS: dict[EngineStatus, str] = {
     EngineStatus.PASS: "#2E7D32",
@@ -23,11 +23,63 @@ STATUS_MARKERS: dict[EngineStatus, str] = {
     EngineStatus.ERROR: "🟣",
 }
 
+_REVIEW_STATUS_ORDER: dict[EngineStatus, int] = {
+    EngineStatus.ERROR: 0,
+    EngineStatus.FAIL: 1,
+    EngineStatus.NOT_EVALUABLE: 2,
+    EngineStatus.PASS: 3,
+    EngineStatus.NOT_APPLICABLE: 4,
+}
+
+_CHECK_LABELS = {
+    WIDTH_RULE_ID: "Opening width",
+    METADATA_RULE_ID: "Metadata completeness",
+}
+
+
+def ordered_results(report: AnalysisReport) -> tuple[RuleResult, ...]:
+    """Order findings for human review without changing the engine report."""
+    return tuple(
+        sorted(
+            report.results,
+            key=lambda result: (
+                _REVIEW_STATUS_ORDER[result.status],
+                result.element_name.casefold(),
+                result.rule_id,
+                result.element_global_id,
+            ),
+        )
+    )
+
+
+def finding_action_summary(report: AnalysisReport) -> str:
+    """Summarise only the findings that call for reviewer action."""
+    actions: list[str] = []
+    failed = sum(result.status is EngineStatus.FAIL for result in report.results)
+    not_evaluable = sum(result.status is EngineStatus.NOT_EVALUABLE for result in report.results)
+    errors = sum(result.status is EngineStatus.ERROR for result in report.results)
+    if failed:
+        actions.append(
+            f"{failed} failed {'check requires' if failed == 1 else 'checks require'} resolution"
+        )
+    if not_evaluable:
+        actions.append(
+            f"{not_evaluable} {'needs' if not_evaluable == 1 else 'need'} additional information"
+        )
+    if errors:
+        actions.append(
+            f"{errors} {'check encountered' if errors == 1 else 'checks encountered'} an internal error"
+        )
+    if not actions:
+        return "Action summary: no findings require follow-up."
+    return "Action summary: " + "; ".join(actions) + "."
+
 
 def result_rows(report: AnalysisReport) -> list[dict[str, str]]:
     """Return direct projections of every authoritative engine finding."""
     return [
         {
+            "check": _CHECK_LABELS.get(result.rule_id, result.rule_id),
             "rule_id": result.rule_id,
             "status": result.status.value,
             "finding_code": result.finding_code,
@@ -39,11 +91,13 @@ def result_rows(report: AnalysisReport) -> list[dict[str, str]]:
     ]
 
 
-def _plot_points(report: AnalysisReport) -> dict[EngineStatus, tuple[list[float], list[str]]]:
+def _plot_points(
+    report: AnalysisReport,
+) -> dict[EngineStatus, tuple[list[float], list[str], list[str]]]:
     doors = {door.element_global_id: door for door in report.door_facts}
-    points: dict[EngineStatus, tuple[list[float], list[str]]] = {
-        EngineStatus.PASS: ([], []),
-        EngineStatus.FAIL: ([], []),
+    points: dict[EngineStatus, tuple[list[float], list[str], list[str]]] = {
+        EngineStatus.PASS: ([], [], []),
+        EngineStatus.FAIL: ([], [], []),
     }
     for result in report.results:
         if result.rule_id != WIDTH_RULE_ID or result.status not in points:
@@ -52,25 +106,27 @@ def _plot_points(report: AnalysisReport) -> dict[EngineStatus, tuple[list[float]
         width_m = None if door is None else door.overall_width_m
         if type(width_m) not in {int, float} or not isfinite(width_m) or width_m <= 0:
             continue
-        values, labels = points[result.status]
+        values, names, global_ids = points[result.status]
         values.append(float(width_m))
-        labels.append(f"{result.element_name} ({result.element_global_id})")
+        names.append(result.element_name)
+        global_ids.append(result.element_global_id)
     return points
 
 
 def width_plot(report: AnalysisReport, threshold_m: float) -> go.Figure:
     """Plot eligible R1 measurements once each against the project threshold."""
     figure = go.Figure()
-    for status, (widths, labels) in _plot_points(report).items():
+    for status, (widths, names, global_ids) in _plot_points(report).items():
         if widths:
             figure.add_trace(
                 go.Scatter(
                     x=widths,
-                    y=labels,
+                    y=names,
+                    customdata=global_ids,
                     mode="markers",
                     name=status.value,
                     marker={"color": STATUS_COLORS[status], "size": 10},
-                    hovertemplate="%{y}<br>%{x:.3f} m<extra></extra>",
+                    hovertemplate="%{y}<br>GlobalId: %{customdata}<br>%{x:.3f} m<extra></extra>",
                 )
             )
     figure.add_vline(x=threshold_m, line_dash="dash", line_color="#1F2937")

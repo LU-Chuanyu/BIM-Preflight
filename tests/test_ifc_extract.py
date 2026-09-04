@@ -143,6 +143,98 @@ def test_blank_fire_rating_is_invalid_and_does_not_inherit_type() -> None:
     assert len(value.evidence_refs) == 2
 
 
+@pytest.mark.parametrize("ifc_value_type", ["IfcText", "IfcIdentifier"])
+def test_fire_rating_rejects_non_label_ifc_strings(ifc_value_type: str) -> None:
+    """Catches accepting IFC text or identifiers where Pset_DoorCommon requires an IfcLabel."""
+    model, door = make_door_model()
+    fire_rating = model.create_entity(
+        "IfcPropertySingleValue",
+        Name="FireRating",
+        NominalValue=model.create_entity(ifc_value_type, "60 min"),
+    )
+    pset = model.create_entity(
+        "IfcPropertySet",
+        GlobalId=ifcopenshell.guid.new(),
+        Name="Pset_DoorCommon",
+        HasProperties=(fire_rating,),
+    )
+    model.create_entity(
+        "IfcRelDefinesByProperties",
+        GlobalId=ifcopenshell.guid.new(),
+        RelatedObjects=(door,),
+        RelatingPropertyDefinition=pset,
+    )
+
+    value = extract_door_facts(model)[0].fire_rating
+
+    assert value.state is ValueState.INVALID
+    assert value.value is None
+    assert value.source is PropertySource.OCCURRENCE
+
+
+@pytest.mark.parametrize("door_type_name", ["IfcDoorType", "IfcDoorStyle"])
+def test_door_type_without_property_sets_is_ignored(door_type_name: str) -> None:
+    """Catches iterating the optional null HasPropertySets attribute on a related door type."""
+    model, door = make_door_model()
+    door_type = model.create_entity(
+        door_type_name,
+        GlobalId=ifcopenshell.guid.new(),
+        Name=f"Empty {door_type_name}",
+    )
+    assert door_type.HasPropertySets is None
+    model.create_entity(
+        "IfcRelDefinesByType",
+        GlobalId=ifcopenshell.guid.new(),
+        RelatedObjects=(door,),
+        RelatingType=door_type,
+    )
+
+    fact = extract_door_facts(model)[0]
+
+    assert fact.fire_exit.state is ValueState.MISSING
+    assert fact.fire_rating.state is ValueState.MISSING
+    assert fact.self_closing.state is ValueState.MISSING
+
+
+def test_conflicting_duplicate_occurrence_fire_ratings_are_invalid() -> None:
+    """Catches silently choosing one of two disagreeing occurrence-level FireRating values."""
+    model, door = make_door_model(occurrence_properties={"FireRating": "30 min"})
+    occurrence_pset = door.IsDefinedBy[0].RelatingPropertyDefinition
+    duplicate = model.create_entity(
+        "IfcPropertySingleValue",
+        Name="FireRating",
+        NominalValue=model.create_entity("IfcLabel", "60 min"),
+    )
+    occurrence_pset.HasProperties = (*occurrence_pset.HasProperties, duplicate)
+
+    value = extract_door_facts(model)[0].fire_rating
+
+    assert value.state is ValueState.INVALID
+    assert value.value is None
+    assert value.source is PropertySource.OCCURRENCE
+    assert len(value.evidence_refs) == 2
+
+
+def test_conflicting_duplicate_type_fire_ratings_are_invalid() -> None:
+    """Catches silently choosing one of two disagreeing type-level FireRating values."""
+    model, door = make_door_model(type_properties={"FireRating": "30 min"})
+    door_type = door.IsTypedBy[0].RelatingType
+    type_pset = door_type.HasPropertySets[0]
+    duplicate = model.create_entity(
+        "IfcPropertySingleValue",
+        Name="FireRating",
+        NominalValue=model.create_entity("IfcLabel", "60 min"),
+    )
+    type_pset.HasProperties = (*type_pset.HasProperties, duplicate)
+
+    value = extract_door_facts(model)[0].fire_rating
+
+    assert value.state is ValueState.INVALID
+    assert value.value is None
+    assert value.source is PropertySource.TYPE
+    assert len(value.evidence_refs) == 2
+
+
 def test_self_closing_requires_an_actual_ifc_boolean() -> None:
     """Catches boolean coercion from free-text door metadata."""
     model, _ = make_door_model(occurrence_properties={"SelfClosing": "false"})

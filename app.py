@@ -20,6 +20,8 @@ from bim_preflight.models import AnalysisReport, EngineStatus, RuleResult
 from bim_preflight.presentation import (
     STATUS_MARKERS,
     evidence_rows,
+    finding_action_summary,
+    ordered_results,
     result_rows,
     width_plot,
 )
@@ -71,20 +73,6 @@ def _status_count(report: AnalysisReport, status: EngineStatus) -> int:
     return sum(result.status is status for result in report.results)
 
 
-def _ordered_results(report: AnalysisReport) -> tuple[RuleResult, ...]:
-    """Order findings for human review without changing the engine report."""
-    return tuple(
-        sorted(
-            report.results,
-            key=lambda result: (
-                result.element_name.casefold(),
-                result.rule_id,
-                result.element_global_id,
-            ),
-        )
-    )
-
-
 def _display_rows(rows: list[dict[str, object]]) -> list[dict[str, str]]:
     """Keep mixed IFC evidence values readable in Streamlit's tabular transport."""
     return [
@@ -99,7 +87,7 @@ def _result_display_rows(report: AnalysisReport) -> list[dict[str, str]]:
         (row["global_id"], row["rule_id"]): row for row in result_rows(report)
     }
     rows: list[dict[str, str]] = []
-    for result in _ordered_results(report):
+    for result in ordered_results(report):
         row = rows_by_result[(result.element_global_id, result.rule_id)]
         status = EngineStatus(row["status"])
         rows.append({"status_indicator": STATUS_MARKERS[status], **row})
@@ -166,44 +154,44 @@ def _show_explanation(draft: ExplanationDraft, mode: str) -> None:
 
 
 def _render_ai_panel(result: RuleResult) -> None:
-    st.subheader("Optional AI explanation")
     has_api_key = bool(os.environ.get("OPENAI_API_KEY"))
-    if not has_api_key:
-        st.caption(_AI_UNAVAILABLE)
-    actions = (
-        ("Explain result", "EXPLAIN_RESULT"),
-        ("Explain missing evidence", "EXPLAIN_MISSING_EVIDENCE"),
-        ("Recommend next manual check", "RECOMMEND_NEXT_MANUAL_CHECK"),
-    )
-    columns = st.columns(3)
-    for column, (label, mode) in zip(columns, actions):
-        with column:
-            mode_applies = is_explanation_mode_applicable(result, mode)
-            if st.button(
-                label,
-                key=f"ai_{mode}",
-                disabled=not has_api_key or not mode_applies,
-            ):
-                try:
-                    st.session_state.explanation_state = (
-                        (result.rule_id, result.element_global_id, mode),
-                        request_explanation(result, mode),
-                    )
-                except ExplanationUnavailable as error:
-                    st.error(str(error))
-                    st.session_state.pop("explanation_state", None)
-    explanation_state = st.session_state.get("explanation_state")
-    if (
-        isinstance(explanation_state, tuple)
-        and len(explanation_state) == 2
-        and isinstance(explanation_state[0], tuple)
-        and len(explanation_state[0]) == 3
-        and explanation_state[0][:2] == (result.rule_id, result.element_global_id)
-        and is_explanation_mode_applicable(result, explanation_state[0][2])
-        and isinstance(explanation_state[1], ExplanationDraft)
-    ):
-        draft = explanation_state[1]
-        _show_explanation(draft, explanation_state[0][2])
+    with st.expander("Optional AI explanation (experimental)", expanded=has_api_key):
+        if not has_api_key:
+            st.caption(_AI_UNAVAILABLE)
+        actions = (
+            ("Explain result", "EXPLAIN_RESULT"),
+            ("Explain missing evidence", "EXPLAIN_MISSING_EVIDENCE"),
+            ("Recommend next manual check", "RECOMMEND_NEXT_MANUAL_CHECK"),
+        )
+        columns = st.columns(3)
+        for column, (label, mode) in zip(columns, actions):
+            with column:
+                mode_applies = is_explanation_mode_applicable(result, mode)
+                if st.button(
+                    label,
+                    key=f"ai_{mode}",
+                    disabled=not has_api_key or not mode_applies,
+                ):
+                    try:
+                        st.session_state.explanation_state = (
+                            (result.rule_id, result.element_global_id, mode),
+                            request_explanation(result, mode),
+                        )
+                    except ExplanationUnavailable as error:
+                        st.error(str(error))
+                        st.session_state.pop("explanation_state", None)
+        explanation_state = st.session_state.get("explanation_state")
+        if (
+            isinstance(explanation_state, tuple)
+            and len(explanation_state) == 2
+            and isinstance(explanation_state[0], tuple)
+            and len(explanation_state[0]) == 3
+            and explanation_state[0][:2] == (result.rule_id, result.element_global_id)
+            and is_explanation_mode_applicable(result, explanation_state[0][2])
+            and isinstance(explanation_state[1], ExplanationDraft)
+        ):
+            draft = explanation_state[1]
+            _show_explanation(draft, explanation_state[0][2])
 
 
 def _render_report(
@@ -213,16 +201,22 @@ def _render_report(
     source_label: str,
 ) -> None:
     st.subheader("Model summary")
-    st.write(
-        {
-            "schema": report.model_info.schema,
-            "project_length_unit": report.model_info.length_unit or "Unavailable",
-            "door_count": report.model_info.door_count,
-            "analysed_source": source_label,
-            "screening_threshold": _threshold_label(source_kind, threshold_m),
-        }
-    )
-
+    model_cards = st.columns(3)
+    for column, (label, value) in zip(
+        model_cards,
+        (
+            ("IFC schema", report.model_info.schema),
+            ("Project unit", report.model_info.length_unit or "Unavailable"),
+            ("Doors", str(report.model_info.door_count)),
+        ),
+    ):
+        with column:
+            st.metric(label, value)
+    st.caption(f"Source: {source_label}")
+    st.caption(f"Screening threshold: {_threshold_label(source_kind, threshold_m)}")
+    length_unit_issue = getattr(report.model_info, "length_unit_issue", None)
+    if length_unit_issue:
+        st.warning(f"Project unit issue: {length_unit_issue}")
     metrics = st.columns(5)
     for column, status in zip(metrics, EngineStatus):
         with column:
@@ -233,16 +227,31 @@ def _render_report(
         return
 
     st.subheader("Deterministic findings")
-    st.dataframe(_result_display_rows(report), hide_index=True, key="result_rows")
+    st.markdown(finding_action_summary(report))
+    st.dataframe(
+        _result_display_rows(report),
+        hide_index=True,
+        key="result_rows",
+        column_config={
+            "status_indicator": st.column_config.TextColumn(""),
+            "check": st.column_config.TextColumn("Check"),
+            "status": st.column_config.TextColumn("Outcome"),
+            "finding_code": st.column_config.TextColumn("Finding code"),
+            "element_name": st.column_config.TextColumn("Door"),
+            "global_id": st.column_config.TextColumn("GlobalId"),
+            "rule_id": st.column_config.TextColumn("Rule ID"),
+            "message": st.column_config.TextColumn("Details"),
+        },
+    )
 
     st.subheader("Opening-width evidence")
     st.plotly_chart(width_plot(report, threshold_m), width="stretch")
 
-    ordered_results = _ordered_results(report)
-    labels = [_finding_label(result) for result in ordered_results]
+    results_for_review = ordered_results(report)
+    labels = [_finding_label(result) for result in results_for_review]
     selected_label = st.selectbox("Select finding", labels, key="finding_selector")
     selected_result = next(
-        result for result in ordered_results if _finding_label(result) == selected_label
+        result for result in results_for_review if _finding_label(result) == selected_label
     )
     selected_key = (selected_result.rule_id, selected_result.element_global_id)
     previous_key = st.session_state.get("selected_finding")
@@ -281,6 +290,7 @@ def main() -> None:
     source = st.radio(
         "IFC source",
         ("Upload IFC", "Bundled synthetic demo"),
+        index=1,
         key="input_source",
         horizontal=True,
     )

@@ -72,7 +72,7 @@ DATA;
 #65=IFCCARTESIANPOINT((0.,0.,0.));
 #66=IFCAXIS2PLACEMENT3D(#65,$,$);
 #67=IFCLOCALPLACEMENT(#17,#66);
-#68=IFCDOOR('1G5_LHlsPSN8$eoQzxnsis',$,'06 Type-Inherited Properties','Project-generated synthetic test case.',$,#67,$,$,2100.,1000.,.DOOR.,.SINGLE_SWING_LEFT.,$);
+#68=IFCDOOR('1G5_LHlsPSN8$eoQzxnsis',$,'06 Type-Inherited Properties','Project-generated synthetic test case.',$,#67,$,$,2100.,1000.,$,$,$);
 #69=IFCPROPERTYSINGLEVALUE('FireExit',$,IFCBOOLEAN(.T.),$);
 #70=IFCPROPERTYSINGLEVALUE('FireRating',$,IFCLABEL('90 min'),$);
 #71=IFCPROPERTYSINGLEVALUE('SelfClosing',$,IFCBOOLEAN(.F.),$);

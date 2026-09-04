@@ -183,11 +183,14 @@ def evaluate_metadata_rule(door: DoorFact) -> RuleResult:
         code = "_".join(f"{field}_{state}" for field, _, state in defects)
         if len(defects) == 1:
             _field, label, state = defects[0]
-            message = f"Required {label} metadata is {'missing' if state == 'MISSING' else 'invalid'}."
+            message = (
+                f"The {label} profile field is {'missing' if state == 'MISSING' else 'invalid'} "
+                "for this project completeness profile."
+            )
         else:
             code = f"METADATA_INCOMPLETE_{code}"
-            message = "Required metadata is incomplete: " + "; ".join(
-                f"{label} is {state.lower()}" for _, label, state in defects
+            message = "This project completeness profile is incomplete: " + "; ".join(
+                f"{label} profile field is {state.lower()}" for _, label, state in defects
             ) + "."
         return _rule_result(
             rule_id=METADATA_RULE_ID,
@@ -203,7 +206,7 @@ def evaluate_metadata_rule(door: DoorFact) -> RuleResult:
         door=door,
         status=EngineStatus.PASS,
         finding_code="METADATA_COMPLETE",
-        message="Required FireRating and SelfClosing metadata are present.",
+        message="The FireRating and SelfClosing profile fields are present for this project completeness profile.",
         evidence_refs=metadata_refs,
         inputs_used=inputs,
     )

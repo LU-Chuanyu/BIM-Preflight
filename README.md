@@ -46,7 +46,7 @@ screening, charts, and evidence inspection do not require an API key.
 | Rule | Applies when | PASS | FAIL | Other outcomes |
 |---|---|---|---|---|
 | `R1_EGRESS_DOOR_OPENING_WIDTH` | Resolved `Pset_DoorCommon.FireExit = TRUE` | Positive, unit-normalised `IfcDoor.OverallWidth` is at least the selected project threshold | The normalised value is below the selected project threshold | Missing, invalid, non-positive, or unnormalisable width is `NOT_EVALUABLE`; explicit `FireExit = FALSE` is `NOT_APPLICABLE` |
-| `R2_EGRESS_DOOR_METADATA_COMPLETENESS` | Resolved `Pset_DoorCommon.FireExit = TRUE` | `FireRating` is a non-empty readable label and `SelfClosing` is a valid boolean | Either required property is missing, blank, invalid, or contradictory at the same source level | Missing/invalid `FireExit` is `NOT_EVALUABLE`; explicit `FireExit = FALSE` is `NOT_APPLICABLE` |
+| `R2_EGRESS_DOOR_METADATA_COMPLETENESS` | Resolved `Pset_DoorCommon.FireExit = TRUE` | `FireRating` is a non-empty readable label and `SelfClosing` is a valid boolean | Either field required by this project completeness profile is missing, blank, invalid, or contradictory at the same source level | Missing/invalid `FireExit` is `NOT_EVALUABLE`; explicit `FireExit = FALSE` is `NOT_APPLICABLE` |
 
 `IfcDoor.OverallWidth` is a model-declared door-opening width proxy, never clear width. The 900 mm
 default is the `Demo project screening profile`, never regulation. R2 checks presence only:
@@ -143,7 +143,7 @@ legal evidence. Its six doors deliberately cover:
 | `05 Missing FireExit` | 1000 mm | missing | applicability unresolved |
 | `06 Type-Inherited Properties` | 1000 mm | type / `TRUE` | `FireRating` and `SelfClosing` also inherited |
 
-SHA-256: `ed46c5f98f5c959f4c004cf8209b7fb12d6fce035086419069313357efe5440f`.
+SHA-256: `b2cacb9e6c97b21a814c56fd787533155faaef084d9e424141302375e6d3bf27`.
 
 ### Official parser smoke sample
 

@@ -51,7 +51,39 @@ def _missing_metadata_ifc_bytes(tmp_path: Path) -> bytes:
     return path.read_bytes()
 
 
+def _unsupported_length_unit_ifc_bytes(tmp_path: Path) -> bytes:
+    path = tmp_path / "unsupported-length-unit.ifc"
+    model, _door = make_door_model(
+        overall_width=1.0,
+        occurrence_properties={"FireExit": True, "FireRating": "60 min", "SelfClosing": False},
+        length_prefix=None,
+    )
+    dimensions = model.create_entity(
+        "IfcDimensionalExponents",
+        LengthExponent=1,
+        MassExponent=0,
+        TimeExponent=0,
+        ElectricCurrentExponent=0,
+        ThermodynamicTemperatureExponent=0,
+        AmountOfSubstanceExponent=0,
+        LuminousIntensityExponent=0,
+    )
+    custom_unit = model.create_entity(
+        "IfcContextDependentUnit",
+        Dimensions=dimensions,
+        UnitType="LENGTHUNIT",
+        Name="CUSTOM_LENGTH",
+    )
+    model.by_type("IfcProject")[0].UnitsInContext = model.create_entity(
+        "IfcUnitAssignment", Units=(custom_unit,)
+    )
+    model.write(str(path))
+    return path.read_bytes()
+
+
 def _upload_and_run(app: AppTest, data: bytes, *, name: str = "doors.ifc") -> AppTest:
+    app.radio(key="input_source").set_value("Upload IFC")
+    app.run()
     app.file_uploader(key="ifc_upload").set_value((name, data, "application/x-step"))
     app.run()
     app.button(key="run_preflight").click()
@@ -69,10 +101,51 @@ def test_empty_state_is_credential_free_and_keeps_the_exact_screening_notice(
     app = _app(monkeypatch)
 
     assert app.exception == []
-    assert app.file_uploader(key="ifc_upload").label == "Upload IFC"
+    assert app.radio(key="input_source").value == "Bundled synthetic demo"
+    assert app.file_uploader == []
     assert app.number_input(key="threshold_mm").value == 900
     assert any(NOTICE == info.value for info in app.info)
     assert app.dataframe == []
+    assert all(button.disabled for button in app.button if button.key.startswith("ai_"))
+
+
+def test_demo_results_use_compact_model_cards_and_an_actionable_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches the default demo retaining a raw model-info dictionary or an unhelpful findings lead."""
+    app = _app(monkeypatch)
+    app.button(key="run_preflight").click()
+    app.run()
+
+    assert app.exception == []
+    assert {_metric_value(app, label) for label in ("IFC schema", "Project unit", "Doors")} == {
+        "IFC4",
+        "MILLIMETRE",
+        "6",
+    }
+    assert "Source" not in {metric.label for metric in app.metric}
+    assert "Screening threshold" not in {metric.label for metric in app.metric}
+    assert any(caption.value == "Source: Bundled synthetic demo" for caption in app.caption)
+    assert any(
+        caption.value == "Screening threshold: Demo project screening profile: 900 mm"
+        for caption in app.caption
+    )
+    assert app.json == []
+    assert any(
+        "2 failed checks require resolution; 2 need additional information." in markdown.value
+        for markdown in app.markdown
+    )
+
+
+def test_missing_key_places_optional_ai_controls_in_a_collapsed_panel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches credential-free AI controls competing with deterministic review while changing no button semantics."""
+    app = _upload_and_run(_app(monkeypatch), _ifc_bytes(tmp_path))
+
+    assert any(
+        expander.label == "Optional AI explanation (experimental)" for expander in app.expander
+    )
     assert all(button.disabled for button in app.button if button.key.startswith("ai_"))
 
 
@@ -116,8 +189,18 @@ def test_rerunning_with_a_higher_threshold_changes_the_authoritative_r1_result(
 
     assert _metric_value(app, "FAIL") == "1"
     assert any(
-        "Selected project screening threshold: 950 mm" in str(node.value) for node in app.json
+        caption.value == "Screening threshold: Selected project screening threshold: 950 mm"
+        for caption in app.caption
     )
+
+
+def test_model_summary_visibly_flags_a_reported_project_unit_issue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a known unsupported project length unit disappearing from reviewer-facing summary."""
+    app = _upload_and_run(_app(monkeypatch), _unsupported_length_unit_ifc_bytes(tmp_path))
+
+    assert any(warning.value == "Project unit issue: LENGTHUNIT_UNSUPPORTED" for warning in app.warning)
 
 
 def test_threshold_labels_reserve_the_demo_profile_for_its_900_mm_demo_value() -> None:

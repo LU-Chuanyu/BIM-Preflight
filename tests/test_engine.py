@@ -68,6 +68,7 @@ def test_analyse_ifc_returns_sorted_two_rule_results_and_project_metadata(tmp_pa
 
     assert report.model_info.schema == "IFC4"
     assert report.model_info.length_unit == "MILLIMETRE"
+    assert report.model_info.length_unit_issue is None
     assert report.model_info.door_count == 1
     assert [fact.element_global_id for fact in report.door_facts] == [global_id]
     assert [(result.element_global_id, result.rule_id) for result in report.results] == [
@@ -115,6 +116,7 @@ def test_custom_length_unit_cannot_normalise_width_or_false_pass_r1(tmp_path: Pa
     width_result = next(result for result in report.results if result.rule_id.startswith("R1_"))
     assert fact.element_global_id == door.GlobalId
     assert report.model_info.length_unit is None
+    assert report.model_info.length_unit_issue == "LENGTHUNIT_UNSUPPORTED"
     assert fact.overall_width_raw == pytest.approx(1.0)
     assert fact.overall_width_m is None
     assert width_result.status is EngineStatus.NOT_EVALUABLE

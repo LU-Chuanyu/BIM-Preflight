@@ -15,7 +15,14 @@ from bim_preflight.models import (
     RuleResult,
     ValueState,
 )
-from bim_preflight.presentation import STATUS_COLORS, evidence_rows, result_rows, width_plot
+from bim_preflight.presentation import (
+    STATUS_COLORS,
+    evidence_rows,
+    finding_action_summary,
+    ordered_results,
+    result_rows,
+    width_plot,
+)
 from bim_preflight.rules import METADATA_RULE_ID, WIDTH_RULE_ID
 
 
@@ -97,6 +104,7 @@ def test_result_rows_keep_all_engine_owned_fields_for_every_status(report: Analy
 
     assert {row["status"] for row in rows} == {status.value for status in EngineStatus}
     assert rows[0] == {
+        "check": "Opening width",
         "rule_id": WIDTH_RULE_ID,
         "status": "PASS",
         "finding_code": "PASS_CODE",
@@ -104,6 +112,40 @@ def test_result_rows_keep_all_engine_owned_fields_for_every_status(report: Analy
         "global_id": "d1",
         "message": "PASS engine message.",
     }
+
+
+def test_ordered_results_prioritise_findings_that_need_attention(report: AnalysisReport) -> None:
+    """Catches review order drifting back to alphabetical status or source order."""
+    assert [result.status for result in ordered_results(report)] == [
+        EngineStatus.ERROR,
+        EngineStatus.FAIL,
+        EngineStatus.NOT_EVALUABLE,
+        EngineStatus.PASS,
+        EngineStatus.NOT_APPLICABLE,
+    ]
+
+
+def test_finding_action_summary_counts_failed_and_not_evaluable_checks(report: AnalysisReport) -> None:
+    """Catches a demo summary that hides either remediation or missing-information work."""
+    assert (
+        finding_action_summary(report)
+        == "Action summary: 1 failed check requires resolution; 1 needs additional information; "
+        "1 check encountered an internal error."
+    )
+
+
+def test_result_rows_add_a_friendly_check_label_without_losing_audit_identifiers(
+    report: AnalysisReport,
+) -> None:
+    """Catches a table that asks reviewers to memorise rule IDs or drops traceability."""
+    rows = result_rows(report)
+
+    assert rows[0]["check"] == "Opening width"
+    assert {"rule_id", "finding_code", "global_id"} <= rows[0].keys()
+
+    metadata_result = _result("d1", EngineStatus.PASS, rule_id=METADATA_RULE_ID)
+    metadata_report = AnalysisReport(report.model_info, report.door_facts, (metadata_result,))
+    assert result_rows(metadata_report)[0]["check"] == "Metadata completeness"
 
 
 def test_width_plot_contains_only_finite_positive_r1_pass_fail_measurements(
@@ -121,6 +163,9 @@ def test_width_plot_contains_only_finite_positive_r1_pass_fail_measurements(
 
     assert figure.layout.xaxis.title.text == "Model-declared opening width (m)"
     assert sorted(value for trace in figure.data for value in trace.x) == [0.8, 1.0]
+    assert sorted(value for trace in figure.data for value in trace.y) == ["Door d1", "Door d2"]
+    assert sorted(value for trace in figure.data for value in trace.customdata) == ["d1", "d2"]
+    assert all("GlobalId: %{customdata}" in trace.hovertemplate for trace in figure.data)
     assert len(figure.layout.shapes) == 1
     assert figure.layout.shapes[0].x0 == 0.9
     assert figure.layout.annotations[0].text == "Project threshold: 0.900 m"

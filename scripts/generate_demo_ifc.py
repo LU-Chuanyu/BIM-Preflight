@@ -177,17 +177,20 @@ def generate_demo_ifc(output_path: str | Path = DEFAULT_OUTPUT) -> Path:
 
     doors: list[ifcopenshell.entity_instance] = []
     for semantic_key, name, width, occurrence_properties in cases:
-        door = model.create_entity(
-            "IfcDoor",
-            GlobalId=_guid(f"door:{semantic_key}"),
-            Name=name,
-            Description="Project-generated synthetic test case.",
-            ObjectPlacement=_placement(model, storey_placement),
-            OverallHeight=2100.0,
-            OverallWidth=width,
-            PredefinedType="DOOR",
-            OperationType="SINGLE_SWING_LEFT",
-        )
+        door_attributes = {
+            "GlobalId": _guid(f"door:{semantic_key}"),
+            "Name": name,
+            "Description": "Project-generated synthetic test case.",
+            "ObjectPlacement": _placement(model, storey_placement),
+            "OverallHeight": 2100.0,
+            "OverallWidth": width,
+        }
+        if semantic_key != "06-type-inherited":
+            door_attributes.update(
+                PredefinedType="DOOR",
+                OperationType="SINGLE_SWING_LEFT",
+            )
+        door = model.create_entity("IfcDoor", **door_attributes)
         doors.append(door)
         if occurrence_properties:
             pset = _property_set(model, semantic_key, occurrence_properties)

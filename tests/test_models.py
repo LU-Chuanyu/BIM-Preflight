@@ -88,8 +88,14 @@ def test_to_primitive_preserves_engine_values() -> None:
 
 
 def test_report_models_convert_recursively_to_json_safe_values() -> None:
-    info = ModelInfo(schema="IFC4", length_unit="MILLIMETRE", door_count=1)
+    info = ModelInfo(
+        schema="IFC4",
+        length_unit="MILLIMETRE",
+        door_count=1,
+        length_unit_issue="LENGTHUNIT_UNSUPPORTED",
+    )
     report = AnalysisReport(model_info=info, door_facts=(), results=(make_rule_result(EngineStatus.PASS),))
     primitive = to_primitive(report)
     assert primitive["model_info"]["schema"] == "IFC4"
+    assert primitive["model_info"]["length_unit_issue"] == "LENGTHUNIT_UNSUPPORTED"
     assert primitive["results"][0]["status"] == "PASS"

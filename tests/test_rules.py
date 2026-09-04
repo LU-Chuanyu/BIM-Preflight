@@ -169,6 +169,10 @@ def test_false_self_closing_is_complete_metadata() -> None:
     result = evaluate_metadata_rule(make_door_fact(fire_exit=True, self_closing=False))
     assert result.status is EngineStatus.PASS
     assert result.finding_code == "METADATA_COMPLETE"
+    assert (
+        result.message
+        == "The FireRating and SelfClosing profile fields are present for this project completeness profile."
+    )
 
 
 def test_blank_fire_rating_fails_metadata_completeness() -> None:
@@ -182,6 +186,7 @@ def test_blank_fire_rating_fails_metadata_completeness() -> None:
     )
     assert result.status is EngineStatus.FAIL
     assert result.finding_code == "FIRE_RATING_INVALID"
+    assert result.message == "The FireRating profile field is invalid for this project completeness profile."
     assert result.evidence_refs == (
         "door.d1.occurrence.Pset_DoorCommon.FireExit",
         "door.d1.occurrence.Pset_DoorCommon.FireRating",
@@ -194,6 +199,7 @@ def test_missing_self_closing_fails_metadata_completeness() -> None:
     result = evaluate_metadata_rule(make_door_fact(fire_exit=True, self_closing=None))
     assert result.status is EngineStatus.FAIL
     assert result.finding_code == "SELF_CLOSING_MISSING"
+    assert result.message == "The SelfClosing profile field is missing for this project completeness profile."
     assert result.evidence_refs == (
         "door.d1.occurrence.Pset_DoorCommon.FireExit",
         "door.d1.occurrence.Pset_DoorCommon.FireRating",
@@ -207,19 +213,19 @@ def test_missing_self_closing_fails_metadata_completeness() -> None:
             ValueState.MISSING,
             ValueState.MISSING,
             "METADATA_INCOMPLETE_FIRE_RATING_MISSING_SELF_CLOSING_MISSING",
-            "Required metadata is incomplete: FireRating is missing; SelfClosing is missing.",
+            "This project completeness profile is incomplete: FireRating profile field is missing; SelfClosing profile field is missing.",
         ),
         (
             ValueState.MISSING,
             ValueState.INVALID,
             "METADATA_INCOMPLETE_FIRE_RATING_MISSING_SELF_CLOSING_INVALID",
-            "Required metadata is incomplete: FireRating is missing; SelfClosing is invalid.",
+            "This project completeness profile is incomplete: FireRating profile field is missing; SelfClosing profile field is invalid.",
         ),
         (
             ValueState.INVALID,
             ValueState.MISSING,
             "METADATA_INCOMPLETE_FIRE_RATING_INVALID_SELF_CLOSING_MISSING",
-            "Required metadata is incomplete: FireRating is invalid; SelfClosing is missing.",
+            "This project completeness profile is incomplete: FireRating profile field is invalid; SelfClosing profile field is missing.",
         ),
     ],
 )

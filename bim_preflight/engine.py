@@ -96,6 +96,7 @@ def analyse_ifc(path: str | Path, threshold_m: float) -> AnalysisReport:
             schema=model.schema,
             length_unit=unit.label,
             door_count=len(door_facts),
+            length_unit_issue=unit.error_code,
         ),
         door_facts=door_facts,
         results=tuple(sorted(results, key=lambda result: (result.element_global_id, result.rule_id))),
