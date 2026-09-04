@@ -184,8 +184,7 @@ been live-model validated.
 | `prompts/runtime/` | Reviewable source copies, guarded against package-resource drift by tests. |
 | `prompts/development/prompt-log.md` | Records local fake-client validation and the absence of a live call. |
 
-No live-model validation has been performed. The repository records no hosted URL, demo video,
-or GitHub remote yet.
+No live-model validation has been performed. The repository records no hosted URL or demo video yet.
 
 ## Limitations
 
