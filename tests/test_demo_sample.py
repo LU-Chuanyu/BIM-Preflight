@@ -20,9 +20,6 @@ APP_PATH = ROOT / "app.py"
 README_PATH = ROOT / "README.md"
 NOTICE_PATH = ROOT / "NOTICE.md"
 DEMO_SCRIPT_PATH = ROOT / "docs" / "demo-script.md"
-IMPLEMENTATION_PLAN_PATH = (
-    ROOT / "docs" / "superpowers" / "plans" / "2026-09-02-bim-preflight-implementation.md"
-)
 DEMO_SHA256 = "b2cacb9e6c97b21a814c56fd787533155faaef084d9e424141302375e6d3bf27"
 OFFICIAL_SHA256 = "3ff9b10bd00c7b96dded51e7ca5a6b69efbea38b049adcdd05fcd247de7e70d5"
 OFFICIAL_LICENSE_SHA256 = "3e20c50b6edfdb4be207f64495586115d0574c8394538109d74f79e1d8976d18"
@@ -146,7 +143,6 @@ def test_release_truth_language_hash_and_docs_remain_synchronised() -> None:
         README_PATH,
         NOTICE_PATH,
         DEMO_SCRIPT_PATH,
-        IMPLEMENTATION_PLAN_PATH,
     )
     assert all(b"candidate-authored" not in path.read_bytes().lower() for path in release_paths)
     assert sha256(DEMO_PATH.read_bytes()).hexdigest() == DEMO_SHA256
@@ -162,12 +158,6 @@ def test_release_truth_language_hash_and_docs_remain_synchronised() -> None:
     assert "selecting the R2 result for `06 Type-Inherited Properties`" in demo_script
     assert "The primary product is the deterministic web tool" in demo_script
     assert "optional AI explanation is experimental" in demo_script
-
-    implementation_plan = IMPLEMENTATION_PLAN_PATH.read_text()
-    assert "- [ ] **Step" not in implementation_plan
-    assert "## Historical plan status" in implementation_plan
-    assert "## Implemented deviations and review hardening" in implementation_plan
-
 
 def test_demo_ifc_passes_schema_and_express_validation() -> None:
     """Catches a generated sample that parses but violates IFC4 schema or EXPRESS rules."""

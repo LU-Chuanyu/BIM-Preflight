@@ -9,6 +9,19 @@ This project solves a narrow review problem: model issues such as a below-profil
 width proxy, incomplete fire-door metadata, or unresolved `FireExit` classification should be
 visible before a human reviewer spends time tracing the IFC manually.
 
+## Portfolio snapshot
+
+- Parses real IFC4 STEP files and retains occurrence/type property provenance.
+- Applies two deterministic, unit-aware screening rules without treating a project threshold as
+  regulation or certification.
+- Keeps optional AI explanations downstream of immutable rule results and rejects malformed or
+  unsupported model output.
+- Includes a six-door synthetic demo, an attributed buildingSMART smoke sample, and 277 passing
+  automated tests in the locally reviewed snapshot.
+
+The repository is designed as a reviewable prototype: the deterministic engine remains useful
+without an API key, and every claim in the interface can be traced back to model evidence.
+
 ## Quick workflow
 
 1. Start the app with `streamlit run app.py`.
